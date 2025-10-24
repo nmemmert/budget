@@ -104,7 +104,7 @@ export default function BudgetDashboard() {
 
   // Save data to Firestore whenever data changes
   useEffect(() => {
-    if (user && (accounts.length > 0 || envelopes.length > 0 || transactions.length > 0 || setupCompleted)) {
+    if (user && (((accounts || []).length > 0 || (envelopes || []).length > 0 || (transactions || []).length > 0 || setupCompleted))) {
       const saveData = async () => {
         try {
           await DataService.saveUserData(user.uid, { accounts, envelopes, transactions, setupCompleted });

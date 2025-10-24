@@ -95,7 +95,7 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
     }
   };
 
-  const totalBalance = accounts.reduce((sum, acc) => sum + acc.balance, 0);
+  const totalBalance = (accounts || []).reduce((sum, acc) => sum + acc.balance, 0);
 
   return (
     <div className="space-y-6">
@@ -120,7 +120,7 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-6 rounded-lg shadow-sm border">
           <h3 className="text-sm font-medium text-gray-500">Total Accounts</h3>
-          <p className="text-2xl font-bold text-gray-900">{accounts.length}</p>
+          <p className="text-2xl font-bold text-gray-900">{(accounts || []).length}</p>
         </div>
         <div className="bg-white p-6 rounded-lg shadow-sm border">
           <h3 className="text-sm font-medium text-gray-500">Total Balance</h3>
@@ -128,7 +128,7 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
         </div>
         <div className="bg-white p-6 rounded-lg shadow-sm border">
           <h3 className="text-sm font-medium text-gray-500">Active Accounts</h3>
-          <p className="text-2xl font-bold text-blue-600">{accounts.filter(acc => acc.isActive).length}</p>
+          <p className="text-2xl font-bold text-blue-600">{(accounts || []).filter(acc => acc.isActive).length}</p>
         </div>
       </div>
 
@@ -138,7 +138,7 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
           <h3 className="text-lg font-medium text-gray-900">Your Accounts</h3>
         </div>
 
-        {accounts.length === 0 ? (
+        {(accounts || []).length === 0 ? (
           <div className="px-6 py-8 text-center">
             <div className="text-4xl mb-4">🏦</div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">No accounts yet</h3>
@@ -152,7 +152,7 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
           </div>
         ) : (
           <div className="divide-y divide-gray-200">
-            {accounts.map((account) => (
+            {(accounts || []).map((account) => (
               <div key={account.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50">
                 <div className="flex items-center space-x-4">
                   <div className={`w-4 h-4 rounded-full ${account.color}`}></div>

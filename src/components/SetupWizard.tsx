@@ -55,6 +55,10 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
     color: 'bg-green-500',
   });
 
+  // Standard envelopes option
+  const [includeStandardEnvelopes, setIncludeStandardEnvelopes] = useState(false);
+  const [standardEnvelopeAccountId, setStandardEnvelopeAccountId] = useState<string>('');
+
   // Income allocation state
   const [incomeAllocations, setIncomeAllocations] = useState<{ [envelopeId: string]: { type: 'percentage' | 'fixed'; value: number } }>({});
   const [defaultPaycheckAmounts, setDefaultPaycheckAmounts] = useState<{ [accountId: string]: number }>({});
@@ -232,11 +236,11 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
       {/* Existing Accounts */}
       <div className="mb-6">
         <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Your Accounts</h3>
-        {accounts.length === 0 ? (
+        {(accounts || []).length === 0 ? (
           <p className="text-gray-500 dark:text-gray-400 text-center py-8">No accounts added yet</p>
         ) : (
           <div className="space-y-3">
-            {accounts.map((account) => (
+            {(accounts || []).map((account) => (
               <div key={account.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                 <div className="flex items-center space-x-3">
                   <div className={`w-4 h-4 rounded-full ${account.color}`}></div>
@@ -275,7 +279,7 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
         </button>
         <button
           onClick={() => setCurrentStep('envelopes')}
-          disabled={accounts.length === 0}
+          disabled={(accounts || []).length === 0}
           className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Next: Create Envelopes →
@@ -407,6 +411,34 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
       </div>
 
       {/* Add Envelope Button */}
+      {/* Standard envelopes option */}
+      <div className="mb-6 p-4 border rounded-lg bg-gray-50">
+        <label className="flex items-center space-x-3">
+          <input
+            type="checkbox"
+            checked={includeStandardEnvelopes}
+            onChange={(e) => setIncludeStandardEnvelopes(e.target.checked)}
+          />
+          <span className="font-medium text-gray-900 dark:text-white">Add standard envelopes</span>
+        </label>
+
+        <div className="mt-3">
+          <label className="block text-sm text-gray-600 mb-1">Assign standard envelopes to account</label>
+          <select
+            value={standardEnvelopeAccountId}
+            onChange={(e) => setStandardEnvelopeAccountId(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md"
+            disabled={!includeStandardEnvelopes}
+          >
+            <option value="">Select an account</option>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>{account.name}</option>
+            ))}
+          </select>
+          <p className="text-sm text-gray-500 mt-2">We'll create a set of common envelopes (Rent, Groceries, Utilities, Savings, Transport, Entertainment, Emergency). You can edit amounts later.</p>
+        </div>
+      </div>
+
       <div className="mb-6">
         <button
           onClick={() => setShowAddEnvelope(true)}
@@ -428,7 +460,33 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
           ← Back
         </button>
         <button
-          onClick={() => setCurrentStep('income-setup')}
+          onClick={() => {
+            // If standard envelopes are requested, create them and then proceed
+            if (includeStandardEnvelopes) {
+              const targetAccountId = standardEnvelopeAccountId || (accounts[0] && accounts[0].id) || '';
+              if (!targetAccountId) {
+                alert('Please select an account to assign standard envelopes to.');
+                return;
+              }
+
+              const standardNames = ['Rent', 'Groceries', 'Utilities', 'Savings', 'Transport', 'Entertainment', 'Emergency'];
+              const newStandardEnvelopes: Envelope[] = standardNames.map((name, idx) => ({
+                id: `env-standard-${Date.now()}-${idx}`,
+                name,
+                allocated: 0,
+                spent: 0,
+                color: envelopeColors[idx % envelopeColors.length],
+                accountId: targetAccountId,
+              }));
+              // Avoid duplicating standard envelopes if they already exist by name on the same account
+              setEnvelopes(prev => {
+                const existingNames = new Set(prev.filter(e => e.accountId === targetAccountId).map(e => e.name));
+                const toAdd = newStandardEnvelopes.filter(e => !existingNames.has(e.name));
+                return [...prev, ...toAdd];
+              });
+            }
+            setCurrentStep('income-setup');
+          }}
           className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
         >
           Next: Set Up Income →
@@ -728,22 +786,22 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
         <div className="grid grid-cols-2 gap-4 text-left">
           <div>
             <p className="text-sm text-gray-500">Accounts</p>
-            <p className="font-semibold text-gray-900">{accounts.length}</p>
+            <p className="font-semibold text-gray-900">{(accounts || []).length}</p>
           </div>
           <div>
             <p className="text-sm text-gray-500">Envelopes</p>
-            <p className="font-semibold text-gray-900">{envelopes.length}</p>
+            <p className="font-semibold text-gray-900">{(envelopes || []).length}</p>
           </div>
           <div>
             <p className="text-sm text-gray-500">Total Balance</p>
             <p className="font-semibold text-gray-900">
-              ${accounts.reduce((sum, acc) => sum + acc.balance, 0).toFixed(2)}
+              ${(accounts || []).reduce((sum, acc) => sum + acc.balance, 0).toFixed(2)}
             </p>
           </div>
           <div>
             <p className="text-sm text-gray-500">Monthly Budget</p>
             <p className="font-semibold text-gray-900">
-              ${envelopes.reduce((sum, env) => sum + env.allocated, 0).toFixed(2)}
+              ${(envelopes || []).reduce((sum, env) => sum + env.allocated, 0).toFixed(2)}
             </p>
           </div>
         </div>
