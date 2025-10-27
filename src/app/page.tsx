@@ -246,14 +246,10 @@ export default function BudgetDashboard() {
     setShowAuthModal(false);
   };
 
-  const handleSetupComplete = (setupData: {
-    accounts: Account[];
-    envelopes: Envelope[];
-    transactions: Transaction[];
-  }) => {
-    setAccounts(setupData.accounts);
-    setEnvelopes(setupData.envelopes);
-    setTransactions(setupData.transactions);
+  const handleSetupComplete = (accounts: Account[], envelopes: Envelope[]) => {
+    setAccounts(accounts);
+    setEnvelopes(envelopes);
+    setTransactions([]);
     setSetupCompleted(true);
     setShowSetupWizard(false);
   };
@@ -290,38 +286,293 @@ export default function BudgetDashboard() {
     setEnvelopes(prevEnvelopes => prevEnvelopes.filter(env => env.id !== envelopeId));
   };
 
-  const handleDataExport = (exportData: { accounts: Account[]; envelopes: Envelope[]; transactions: Transaction[] }) => {
-    // Implement data export logic here (e.g., download CSV, send to server, etc.)
-    console.log('Exporting data:', exportData);
-  };
-
   return (
-    <div>
-      {/* Render components based on current view */}
-      {currentView === 'dashboard' && <div>Dashboard View</div>}
-      {currentView === 'accounts' && <div>Accounts View</div>}
-      {currentView === 'transactions' && <div>Transactions View</div>}
-      {currentView === 'envelopes' && <div>Envelopes View</div>}
-      {currentView === 'settings' && <div>Settings View</div>}
+    <div className="min-h-screen bg-gray-50">
+      {/* Navigation */}
+      <nav className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex">
+              <div className="flex-shrink-0 flex items-center">
+                <h1 className="text-xl font-bold text-gray-900">Envelope Budgeting</h1>
+              </div>
+              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
+                <button
+                  onClick={() => setCurrentView('dashboard')}
+                  className={`border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
+                    currentView === 'dashboard' ? 'border-indigo-500 text-gray-900' : ''
+                  }`}
+                >
+                  Dashboard
+                </button>
+                <button
+                  onClick={() => setCurrentView('accounts')}
+                  className={`border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
+                    currentView === 'accounts' ? 'border-indigo-500 text-gray-900' : ''
+                  }`}
+                >
+                  Accounts
+                </button>
+                <button
+                  onClick={() => setCurrentView('transactions')}
+                  className={`border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
+                    currentView === 'transactions' ? 'border-indigo-500 text-gray-900' : ''
+                  }`}
+                >
+                  Transactions
+                </button>
+                <button
+                  onClick={() => setCurrentView('envelopes')}
+                  className={`border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
+                    currentView === 'envelopes' ? 'border-indigo-500 text-gray-900' : ''
+                  }`}
+                >
+                  Envelopes
+                </button>
+                <button
+                  onClick={() => setCurrentView('settings')}
+                  className={`border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
+                    currentView === 'settings' ? 'border-indigo-500 text-gray-900' : ''
+                  }`}
+                >
+                  Settings
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center">
+              {user ? (
+                <button
+                  onClick={handleSignOut}
+                  className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  Sign Out
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  Sign In
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </nav>
 
-      {/* Auth modal */}
-      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onSuccess={handleAuthSuccess} />}
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        {loading ? (
+          <div className="text-center">Loading...</div>
+        ) : (
+          <>
+            {currentView === 'dashboard' && (
+              <div className="px-4 py-6 sm:px-0">
+                <h2 className="text-2xl font-bold text-gray-900 mb-6">Dashboard</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="bg-white overflow-hidden shadow rounded-lg">
+                    <div className="p-5">
+                      <div className="flex items-center">
+                        <div className="flex-shrink-0">
+                          <div className="w-8 h-8 bg-green-500 rounded-md flex items-center justify-center">
+                            <span className="text-white text-sm font-medium">$</span>
+                          </div>
+                        </div>
+                        <div className="ml-5 w-0 flex-1">
+                          <dl>
+                            <dt className="text-sm font-medium text-gray-500 truncate">Total Balance</dt>
+                            <dd className="text-lg font-medium text-gray-900">
+                              ${accounts.reduce((sum, acc) => sum + acc.balance, 0).toFixed(2)}
+                            </dd>
+                          </dl>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-white overflow-hidden shadow rounded-lg">
+                    <div className="p-5">
+                      <div className="flex items-center">
+                        <div className="flex-shrink-0">
+                          <div className="w-8 h-8 bg-blue-500 rounded-md flex items-center justify-center">
+                            <span className="text-white text-sm font-medium">E</span>
+                          </div>
+                        </div>
+                        <div className="ml-5 w-0 flex-1">
+                          <dl>
+                            <dt className="text-sm font-medium text-gray-500 truncate">Envelopes</dt>
+                            <dd className="text-lg font-medium text-gray-900">{envelopes.length}</dd>
+                          </dl>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-white overflow-hidden shadow rounded-lg">
+                    <div className="p-5">
+                      <div className="flex items-center">
+                        <div className="flex-shrink-0">
+                          <div className="w-8 h-8 bg-purple-500 rounded-md flex items-center justify-center">
+                            <span className="text-white text-sm font-medium">T</span>
+                          </div>
+                        </div>
+                        <div className="ml-5 w-0 flex-1">
+                          <dl>
+                            <dt className="text-sm font-medium text-gray-500 truncate">Transactions</dt>
+                            <dd className="text-lg font-medium text-gray-900">{transactions.length}</dd>
+                          </dl>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-white shadow overflow-hidden sm:rounded-md">
+                  <div className="px-4 py-5 sm:px-6">
+                    <h3 className="text-lg leading-6 font-medium text-gray-900">Recent Transactions</h3>
+                  </div>
+                  <ul className="divide-y divide-gray-200">
+                    {transactions.slice(-5).reverse().map((transaction) => (
+                      <li key={transaction.id}>
+                        <div className="px-4 py-4 sm:px-6">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center">
+                              <p className="text-sm font-medium text-gray-900">{transaction.description}</p>
+                              <p className="ml-2 text-sm text-gray-500">
+                                {transaction.date.toLocaleDateString()}
+                              </p>
+                            </div>
+                            <div className="flex items-center">
+                              <p className={`text-sm font-medium ${transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                ${Math.abs(transaction.amount).toFixed(2)}
+                              </p>
+                              <button
+                                onClick={() => setEditingTransaction(transaction)}
+                                className="ml-2 text-indigo-600 hover:text-indigo-900"
+                              >
+                                Edit
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+            {currentView === 'accounts' && (
+              <div className="px-4 py-6 sm:px-0">
+                <AccountManagement
+                  accounts={accounts}
+                  onAccountAdd={handleAccountAdd}
+                  onAccountUpdate={handleAccountUpdate}
+                  onAccountDelete={handleAccountDelete}
+                />
+              </div>
+            )}
+            {currentView === 'transactions' && (
+              <div className="px-4 py-6 sm:px-0">
+                <h2 className="text-2xl font-bold text-gray-900 mb-6">Transactions</h2>
+                <div className="bg-white shadow overflow-hidden sm:rounded-md">
+                  <ul className="divide-y divide-gray-200">
+                    {transactions.map((transaction) => (
+                      <li key={transaction.id}>
+                        <div className="px-4 py-4 sm:px-6">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">{transaction.description}</p>
+                              <p className="text-sm text-gray-500">
+                                {transaction.date.toLocaleDateString()} • {accounts.find(acc => acc.id === transaction.accountId)?.name}
+                              </p>
+                            </div>
+                            <div className="flex items-center">
+                              <p className={`text-sm font-medium ${transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                ${Math.abs(transaction.amount).toFixed(2)}
+                              </p>
+                              <button
+                                onClick={() => setEditingTransaction(transaction)}
+                                className="ml-2 text-indigo-600 hover:text-indigo-900"
+                              >
+                                Edit
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+            {currentView === 'envelopes' && (
+              <div className="px-4 py-6 sm:px-0">
+                <h2 className="text-2xl font-bold text-gray-900 mb-6">Envelopes</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {envelopes.map((envelope) => (
+                    <div key={envelope.id} className="bg-white overflow-hidden shadow rounded-lg">
+                      <div className="p-5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center">
+                            <div
+                              className="w-4 h-4 rounded-full mr-3"
+                              style={{ backgroundColor: envelope.color }}
+                            ></div>
+                            <h3 className="text-lg font-medium text-gray-900">{envelope.name}</h3>
+                          </div>
+                          <button
+                            onClick={() => setEditingEnvelope(envelope)}
+                            className="text-indigo-600 hover:text-indigo-900"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                        <div className="mt-4">
+                          <div className="flex justify-between text-sm text-gray-600">
+                            <span>Allocated</span>
+                            <span>${envelope.allocated.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between text-sm text-gray-600">
+                            <span>Spent</span>
+                            <span>${envelope.spent.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between text-sm font-medium text-gray-900">
+                            <span>Remaining</span>
+                            <span>${(envelope.allocated - envelope.spent).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-6">
+                  <button
+                    onClick={() => setShowCreateEnvelope(true)}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                  >
+                    Create Envelope
+                  </button>
+                </div>
+              </div>
+            )}
+            {currentView === 'settings' && (
+              <div className="px-4 py-6 sm:px-0">
+                <h2 className="text-2xl font-bold text-gray-900 mb-6">Settings</h2>
+                <DataExport
+                  envelopes={envelopes}
+                  transactions={transactions}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </main>
 
-      {/* Setup wizard */}
-      {showSetupWizard && <SetupWizard onComplete={handleSetupComplete} />}
-
-      {/* Data input component */}
-      <DataInput
-        onDataImported={(importedData) => {
-          // Handle imported data (e.g., from CSV)
-          console.log('Imported data:', importedData);
-        }}
-      />
-
-      {/* Transaction edit component */}
+      {/* Modals and Components */}
+      {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} onAuthSuccess={handleAuthSuccess} />}
+      {showSetupWizard && <SetupWizard onComplete={handleSetupComplete} onSkip={() => setShowSetupWizard(false)} />}
       {editingTransaction && (
         <TransactionEdit
           transaction={editingTransaction}
+          envelopes={envelopes.map(env => ({ id: env.id, name: env.name }))}
+          accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
           onSave={(updatedTransaction) => {
             handleTransactionEdit(updatedTransaction);
             setEditingTransaction(null);
@@ -329,45 +580,34 @@ export default function BudgetDashboard() {
           onCancel={() => setEditingTransaction(null)}
         />
       )}
-
-      {/* Envelope create/edit component */}
       {showCreateEnvelope && (
         <EnvelopeCreate
-          onCreate={(newEnvelope) => {
+          onEnvelopeCreated={(newEnvelope) => {
             handleCreateEnvelope(newEnvelope);
             setShowCreateEnvelope(false);
           }}
           onCancel={() => setShowCreateEnvelope(false)}
+          accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
         />
       )}
       {editingEnvelope && (
         <EnvelopeEdit
           envelope={editingEnvelope}
-          onSave={(updatedEnvelope) => {
+          onEnvelopeUpdated={(updatedEnvelope) => {
             handleEnvelopeUpdate(updatedEnvelope);
             setEditingEnvelope(null);
           }}
           onCancel={() => setEditingEnvelope(null)}
+          accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
         />
       )}
 
-      {/* Data export component */}
-      <DataExport
-        accounts={accounts}
-        envelopes={envelopes}
-        transactions={transactions}
-        onExport={handleDataExport}
+      {/* Always visible components */}
+      <DataInput
+        onTransactionsAdded={handleTransactionsAdded}
+        envelopes={envelopes.map(env => ({ id: env.id, name: env.name }))}
+        accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
       />
-
-      {/* Account management component */}
-      <AccountManagement
-        accounts={accounts}
-        onAccountAdd={handleAccountAdd}
-        onAccountUpdate={handleAccountUpdate}
-        onAccountDelete={handleAccountDelete}
-      />
-
-      {/* Get Paid component */}
       <GetPaid
         accounts={accounts}
         envelopes={envelopes}
