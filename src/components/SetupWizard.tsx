@@ -147,15 +147,9 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
         return account;
       });
 
-      await DataService.saveUserData('current-user-id', {
-        accounts: accountsWithDefaults,
-        envelopes: envelopesWithAllocations,
-        transactions: [],
-        setupCompleted: true,
-      });
       onComplete(accountsWithDefaults, envelopesWithAllocations);
     } catch (error) {
-      console.error('Error saving setup data:', error);
+      console.error('Error completing setup:', error);
     }
   };
 
@@ -163,8 +157,8 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
     <div className="text-center">
       <div className="mb-8">
         <div className="text-6xl mb-4">💰</div>
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Welcome to Envelope Budgeting</h1>
-        <p className="text-gray-600 dark:text-gray-300">Let's set up your budget to get started with secure, organized financial tracking.</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome to Envelope Budgeting</h1>
+        <p className="text-gray-600 mb-4">Let's set up your budget to get started with secure, organized financial tracking.</p>
       </div>
 
       <div className="space-y-4">
@@ -187,8 +181,8 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
   const renderDataSource = () => (
     <div className="text-center">
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">How would you like to set up your data?</h2>
-        <p className="text-gray-600 dark:text-gray-300">Choose how you'd like to get started with your budget.</p>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">How would you like to set up your data?</h2>
+        <p className="text-gray-600">Choose how you'd like to get started with your budget.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
@@ -200,8 +194,8 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
           className="p-6 border-2 border-gray-200 rounded-lg hover:border-blue-500 transition-colors"
         >
           <div className="text-4xl mb-3">📊</div>
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Import Data</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-300">Upload CSV files from your bank or credit card statements</p>
+          <h3 className="font-semibold text-gray-900 mb-2">Import Data</h3>
+          <p className="text-sm text-gray-600">Upload CSV files from your bank or credit card statements</p>
         </button>
 
         <button
@@ -212,8 +206,8 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
           className="p-6 border-2 border-gray-200 rounded-lg hover:border-blue-500 transition-colors"
         >
           <div className="text-4xl mb-3">✏️</div>
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Manual Setup</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-300">Add your accounts and envelopes manually</p>
+          <h3 className="font-semibold text-gray-900 mb-2">Manual Setup</h3>
+          <p className="text-sm text-gray-600">Add your accounts and envelopes manually</p>
         </button>
       </div>
 
@@ -229,8 +223,8 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
   const renderAccounts = () => (
     <div>
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Set Up Your Accounts</h2>
-        <p className="text-gray-600 dark:text-gray-300">Add your bank accounts, credit cards, and other financial accounts.</p>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Set Up Your Accounts</h2>
+        <p className="text-gray-600">Add your bank accounts, credit cards, and other financial accounts.</p>
       </div>
 
       {/* Existing Accounts */}
@@ -380,8 +374,8 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
   const renderEnvelopes = () => (
     <div>
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Create Your Envelopes</h2>
-        <p className="text-gray-600 dark:text-gray-300">Set up budget categories for different spending areas.</p>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Create Your Envelopes</h2>
+        <p className="text-gray-600">Set up budget categories for different spending areas.</p>
       </div>
 
       {/* Existing Envelopes */}
@@ -577,8 +571,8 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
   const renderIncomeSetup = () => (
     <div>
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Income Allocation Setup</h2>
-        <p className="text-gray-600 dark:text-gray-300">Set up how your income is automatically allocated to envelopes.</p>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Income Allocation Setup</h2>
+        <p className="text-gray-600">Set up how your income is automatically allocated to envelopes.</p>
       </div>
 
       {/* Income Allocation Settings */}
@@ -690,8 +684,8 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
   const renderGetPaidSetup = () => (
     <div>
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Get Paid Setup</h2>
-        <p className="text-gray-600 dark:text-gray-300">Set up your default paycheck amounts for quick income entry.</p>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Get Paid Setup</h2>
+        <p className="text-gray-600">Set up your default paycheck amounts for quick income entry.</p>
       </div>
 
       {/* Default Paycheck Amounts */}
@@ -777,8 +771,8 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
     <div className="text-center">
       <div className="mb-8">
         <div className="text-6xl mb-4">🎉</div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Setup Complete!</h2>
-        <p className="text-gray-600 dark:text-gray-300">Your envelope budgeting system is ready to use.</p>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Setup Complete!</h2>
+        <p className="text-gray-600">Your envelope budgeting system is ready to use.</p>
       </div>
 
       <div className="bg-gray-50 rounded-lg p-6 mb-8">
