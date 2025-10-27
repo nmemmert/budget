@@ -28,11 +28,12 @@ interface Envelope {
 interface SetupWizardProps {
   onComplete: (accounts: Account[], envelopes: Envelope[]) => void;
   onSkip: () => void;
+  userId: string;
 }
 
 type WizardStep = 'welcome' | 'data-source' | 'accounts' | 'envelopes' | 'income-setup' | 'get-paid-setup' | 'complete';
 
-export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
+export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardProps) {
   const [currentStep, setCurrentStep] = useState<WizardStep>('welcome');
   const [dataSource, setDataSource] = useState<'import' | 'manual' | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -147,9 +148,15 @@ export default function SetupWizard({ onComplete, onSkip }: SetupWizardProps) {
         return account;
       });
 
+      await DataService.saveUserData(userId, {
+        accounts: accountsWithDefaults,
+        envelopes: envelopesWithAllocations,
+        transactions: [],
+        setupCompleted: true,
+      });
       onComplete(accountsWithDefaults, envelopesWithAllocations);
     } catch (error) {
-      console.error('Error completing setup:', error);
+      console.error('Error saving setup data:', error);
     }
   };
 

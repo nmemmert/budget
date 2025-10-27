@@ -567,7 +567,7 @@ export default function BudgetDashboard() {
 
       {/* Modals and Components */}
       {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} onAuthSuccess={handleAuthSuccess} />}
-      {showSetupWizard && <SetupWizard onComplete={handleSetupComplete} onSkip={() => setShowSetupWizard(false)} />}
+      {showSetupWizard && <SetupWizard onComplete={handleSetupComplete} onSkip={() => setShowSetupWizard(false)} userId={user?.uid || ''} />}
       {editingTransaction && (
         <TransactionEdit
           transaction={editingTransaction}
