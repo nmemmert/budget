@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import { AuthService } from '../lib/authService';
+import { DataService } from '../lib/dataService';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -25,12 +25,14 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalP
 
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        const user = await AuthService.signIn(email, password);
+        DataService.setUserId(user.userId);
       } else {
         if (password !== confirmPassword) {
           throw new Error('Passwords do not match');
         }
-        await createUserWithEmailAndPassword(auth, email, password);
+        const user = await AuthService.signUp(email, password);
+        DataService.setUserId(user.userId);
       }
       onAuthSuccess();
       onClose();

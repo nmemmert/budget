@@ -1,6 +1,4 @@
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { db } from './firebase';
-import { encryptData, decryptData } from './crypto';
+// Local file-based data service (no Firebase needed)
 
 interface Envelope {
   id: string;
@@ -19,7 +17,7 @@ interface Transaction {
   accountId: string; // Link transaction to specific account
   amount: number;
   description: string;
-  date: Date;
+  date: Date | string; // Support both Date objects and ISO strings
   category?: string;
 }
 
@@ -42,87 +40,87 @@ interface UserData {
   setupCompleted: boolean;
 }
 
-const ENCRYPTION_KEY = process.env.NEXT_PUBLIC_ENCRYPTION_KEY || 'default-key-change-in-production';
-
 export class DataService {
-  private static async encryptUserData(data: UserData): Promise<string> {
-    return await encryptData(JSON.stringify(data), ENCRYPTION_KEY);
+  private static currentUserId: string | null = null;
+
+  static setUserId(userId: string | null) {
+    this.currentUserId = userId;
+    if (typeof window !== 'undefined') {
+      if (userId) {
+        localStorage.setItem('userId', userId);
+      } else {
+        localStorage.removeItem('userId');
+      }
+    }
   }
 
-  private static async decryptUserData(encryptedData: string): Promise<UserData> {
-    const decrypted = await decryptData(encryptedData, ENCRYPTION_KEY);
-    return JSON.parse(decrypted);
+  static getUserId(): string | null {
+    if (this.currentUserId) return this.currentUserId;
+    if (typeof window !== 'undefined') {
+      this.currentUserId = localStorage.getItem('userId');
+    }
+    return this.currentUserId;
   }
 
-  static async saveUserData(userId: string, data: UserData): Promise<void> {
+  static clearUserId() {
+    this.setUserId(null);
+  }
+
+  static async saveUserData(data: UserData): Promise<void> {
+    const userId = this.getUserId();
+    if (!userId) throw new Error('No user ID set');
+
     try {
-      const encryptedData = await this.encryptUserData(data);
-      const userDocRef = doc(db, 'users', userId);
-      await setDoc(userDocRef, {
-        data: encryptedData,
-        lastUpdated: new Date(),
+      const response = await fetch('/api/data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+        },
+        body: JSON.stringify(data),
       });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to save data');
+      }
     } catch (error) {
       console.error('Error saving user data:', error);
       throw error;
     }
   }
 
-  static async loadUserData(userId: string): Promise<UserData | null> {
-    try {
-      const userDocRef = doc(db, 'users', userId);
-      const userDoc = await getDoc(userDocRef);
+  static async loadUserData(): Promise<UserData | null> {
+    const userId = this.getUserId();
+    if (!userId) throw new Error('No user ID set');
 
-      if (userDoc.exists()) {
-        const encryptedData = userDoc.data()?.data;
-        if (encryptedData) {
-          return await this.decryptUserData(encryptedData);
-        }
+    try {
+      const response = await fetch('/api/data', {
+        method: 'GET',
+        headers: {
+          'x-user-id': userId,
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to load data');
       }
 
-      // Return default data if no data exists
-      return {
-        accounts: [
-          {
-            id: 'checking-1',
-            name: 'Main Checking',
-            type: 'checking' as const,
-            balance: 2500.00,
-            institution: 'Bank of America',
-            color: 'bg-blue-500',
-            isActive: true,
-          },
-          {
-            id: 'savings-1',
-            name: 'Emergency Savings',
-            type: 'savings' as const,
-            balance: 5000.00,
-            institution: 'Bank of America',
-            color: 'bg-green-500',
-            isActive: true,
-          },
-        ],
-        envelopes: [
-          { id: '1', name: 'Groceries', allocated: 500, spent: 0, color: 'bg-green-500', accountId: 'checking-1' },
-          { id: '2', name: 'Transportation', allocated: 300, spent: 0, color: 'bg-blue-500', accountId: 'checking-1' },
-          { id: '3', name: 'Entertainment', allocated: 200, spent: 0, color: 'bg-purple-500', accountId: 'checking-1' },
-          { id: '4', name: 'Utilities', allocated: 250, spent: 0, color: 'bg-orange-500', accountId: 'checking-1' },
-        ],
-        transactions: [],
-        setupCompleted: false,
-      };
+      const result = await response.json();
+      return result.data;
     } catch (error) {
       console.error('Error loading user data:', error);
       throw error;
     }
   }
 
-  static async updateUserData(userId: string, updates: Partial<UserData>): Promise<void> {
+  static async updateUserData(updates: Partial<UserData>): Promise<void> {
     try {
-      const currentData = await this.loadUserData(userId);
+      const currentData = await this.loadUserData();
       if (currentData) {
         const updatedData = { ...currentData, ...updates };
-        await this.saveUserData(userId, updatedData);
+        await this.saveUserData(updatedData);
       }
     } catch (error) {
       console.error('Error updating user data:', error);

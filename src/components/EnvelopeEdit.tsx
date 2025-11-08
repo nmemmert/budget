@@ -24,6 +24,7 @@ interface EnvelopeEditProps {
     incomeAllocation?: number;
     incomeAllocationType?: 'percentage' | 'fixed';
   }) => void;
+  onEnvelopeDeleted?: (envelopeId: string) => void;
   onCancel: () => void;
 }
 
@@ -38,13 +39,22 @@ const colorOptions = [
   { value: 'bg-indigo-500', label: 'Indigo', color: '#6366F1' },
 ];
 
-export default function EnvelopeEdit({ envelope, onEnvelopeUpdated, onCancel, accounts }: EnvelopeEditProps) {
+export default function EnvelopeEdit({ envelope, onEnvelopeUpdated, onEnvelopeDeleted, onCancel, accounts }: EnvelopeEditProps) {
   const [name, setName] = useState(envelope.name);
   const [allocated, setAllocated] = useState(envelope.allocated.toString());
   const [selectedColor, setSelectedColor] = useState(envelope.color);
   const [selectedAccount, setSelectedAccount] = useState(envelope.accountId);
   const [incomeAllocationType, setIncomeAllocationType] = useState<'percentage' | 'fixed'>(envelope.incomeAllocationType || 'percentage');
   const [incomeAllocation, setIncomeAllocation] = useState(envelope.incomeAllocation?.toString() || '');
+
+  const handleDelete = () => {
+    if (confirm(`Are you sure you want to delete the envelope "${envelope.name}"? Transactions linked to this envelope will be unassigned.`)) {
+      if (onEnvelopeDeleted) {
+        onEnvelopeDeleted(envelope.id);
+      }
+      onCancel();
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -215,6 +225,13 @@ export default function EnvelopeEdit({ envelope, onEnvelopeUpdated, onCancel, ac
           </div>
 
           <div className="flex space-x-3 pt-4">
+            <button
+              type="button"
+              onClick={handleDelete}
+              className="flex-1 bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
+            >
+              Delete Envelope
+            </button>
             <button
               type="submit"
               className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"

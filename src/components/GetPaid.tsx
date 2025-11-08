@@ -107,7 +107,7 @@ export default function GetPaid({ accounts, envelopes, onIncomeAdded, onAccountU
 
     // Add the main paycheck transaction to the account
     transactions.push({
-      id: `paycheck-${Date.now()}`,
+      id: crypto.randomUUID(),
       amount: paycheckAmount,
       description: description || 'Paycheck',
       date: new Date(),
@@ -118,7 +118,7 @@ export default function GetPaid({ accounts, envelopes, onIncomeAdded, onAccountU
     Object.entries(distribution).forEach(([envelopeId, allocatedAmount]) => {
       if (allocatedAmount > 0) {
         transactions.push({
-          id: `allocation-${envelopeId}-${Date.now()}`,
+          id: crypto.randomUUID(),
           envelopeId,
           amount: allocatedAmount,
           description: `Paycheck allocation - ${envelopes.find(e => e.id === envelopeId)?.name}`,
@@ -372,52 +372,6 @@ export default function GetPaid({ accounts, envelopes, onIncomeAdded, onAccountU
                     </div>
                   </div>
                 </>
-              )}
-
-              {/* Default Amount */}
-              {selectedAccountId && (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowDefaultAmountField(!showDefaultAmountField)}
-                    className="text-sm text-blue-600 hover:underline mb-2"
-                  >
-                    {showDefaultAmountField ? 'Hide' : 'Set'} Default Paycheck Amount
-                  </button>
-
-                  {showDefaultAmountField && (
-                    <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                      <h4 className="font-medium text-gray-900 mb-3">Default Paycheck Amount</h4>
-                      <div className="flex items-center space-x-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={defaultAmountInput}
-                          onChange={(e) => setDefaultAmountInput(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="0.00"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleSetDefaultAmount}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                        >
-                          Set Default
-                        </button>
-                      </div>
-
-                      <div className="mt-3">
-                        <button
-                          type="button"
-                          onClick={handleUseDefaultAmount}
-                          className="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-                        >
-                          Use Default Amount
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
               )}
 
               {/* Actions */}

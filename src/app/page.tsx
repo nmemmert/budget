@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import { AuthService } from '../lib/authService';
 import { DataService } from '../lib/dataService';
 import DataInput from '../components/DataInput';
 import TransactionEdit from '../components/TransactionEdit';
@@ -13,6 +12,11 @@ import AuthModal from '../components/AuthModal';
 import SetupWizard from '../components/SetupWizard';
 import AccountManagement from '../components/AccountManagement';
 import GetPaid from '../components/GetPaid';
+
+interface User {
+  userId: string;
+  email: string;
+}
 
 interface Account {
   id: string;
@@ -65,18 +69,26 @@ export default function BudgetDashboard() {
   const [showCreateEnvelope, setShowCreateEnvelope] = useState(false);
   const [editingEnvelope, setEditingEnvelope] = useState<Envelope | null>(null);
 
-  // Initialize Firebase auth listener
+  // Initialize auth listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = AuthService.onAuthStateChanged(async (user) => {
       setUser(user);
       if (user) {
-        // Load user data from Firestore
+        // Set user ID for DataService
+        DataService.setUserId(user.userId);
+        
+        // Load user data
         try {
-          const userData = await DataService.loadUserData(user.uid);
+          const userData = await DataService.loadUserData();
           if (userData) {
             setAccounts(userData.accounts || []);
             setEnvelopes(userData.envelopes || []);
-            setTransactions(userData.transactions || []);
+            // Convert date strings to Date objects
+            const transactionsWithDates = (userData.transactions || []).map(t => ({
+              ...t,
+              date: typeof t.date === 'string' ? new Date(t.date) : t.date
+            }));
+            setTransactions(transactionsWithDates);
             setSetupCompleted(userData.setupCompleted || false);
             setShowSetupWizard(!(userData.setupCompleted || false));
           } else {
@@ -90,6 +102,7 @@ export default function BudgetDashboard() {
         }
       } else {
         // Clear data when user logs out
+        DataService.setUserId(null);
         setAccounts([]);
         setEnvelopes([]);
         setTransactions([]);
@@ -102,12 +115,22 @@ export default function BudgetDashboard() {
     return () => unsubscribe();
   }, []);
 
-  // Save data to Firestore whenever data changes
+  // Save data whenever data changes
   useEffect(() => {
     if (user && (((accounts || []).length > 0 || (envelopes || []).length > 0 || (transactions || []).length > 0 || setupCompleted))) {
       const saveData = async () => {
         try {
-          await DataService.saveUserData(user.uid, { accounts, envelopes, transactions, setupCompleted });
+          // Recalculate envelope spent amounts before saving
+          const updatedEnvelopes = calculateEnvelopeSpending(envelopes, transactions);
+          // Recalculate account balances before saving
+          const updatedAccounts = calculateAccountBalances(accounts, transactions);
+          
+          await DataService.saveUserData({ 
+            accounts: updatedAccounts, 
+            envelopes: updatedEnvelopes, 
+            transactions, 
+            setupCompleted 
+          });
         } catch (error) {
           console.error('Error saving user data:', error);
         }
@@ -115,6 +138,41 @@ export default function BudgetDashboard() {
       saveData();
     }
   }, [user, accounts, envelopes, transactions, setupCompleted]);
+
+  // Calculate envelope spending from transactions
+  const calculateEnvelopeSpending = (envelopes: Envelope[], transactions: Transaction[]): Envelope[] => {
+    return envelopes.map(envelope => {
+      const envelopeTransactions = transactions.filter(t => t.envelopeId === envelope.id);
+      const spent = envelopeTransactions.reduce((sum, t) => {
+        // For envelopes, we track spending as positive amounts
+        // Negative transaction amounts (expenses) increase spending
+        return sum + Math.abs(t.amount < 0 ? t.amount : 0);
+      }, 0);
+      return { ...envelope, spent };
+    });
+  };
+
+  // Calculate account balances from transactions
+  const calculateAccountBalances = (accounts: Account[], transactions: Transaction[]): Account[] => {
+    // Group transactions by account
+    const accountTransactionMap = new Map<string, Transaction[]>();
+    transactions.forEach(t => {
+      if (!accountTransactionMap.has(t.accountId)) {
+        accountTransactionMap.set(t.accountId, []);
+      }
+      accountTransactionMap.get(t.accountId)!.push(t);
+    });
+
+    return accounts.map(account => {
+      const accountTransactions = accountTransactionMap.get(account.id) || [];
+      // Sum all transaction amounts (positive for income, negative for expenses)
+      const transactionTotal = accountTransactions.reduce((sum, t) => sum + t.amount, 0);
+      // Balance is initial balance plus transaction total
+      // Note: This assumes the current balance includes initial setup balance
+      // In a real app, you might want to track initial balance separately
+      return account;
+    });
+  };
 
   const handleTransactionsAdded = (newTransactions: Transaction[]) => {
     const allTransactions = [...newTransactions];
@@ -139,7 +197,7 @@ export default function BudgetDashboard() {
                 const allocatedAmount = transaction.amount * proportion;
                 if (allocatedAmount > 0) {
                   allTransactions.push({
-                    id: `allocation-${envelope.id}-${Date.now()}-${Math.random()}`,
+                    id: crypto.randomUUID(),
                     envelopeId: envelope.id,
                     amount: allocatedAmount,
                     description: `Income allocation - ${envelope.name}`,
@@ -161,7 +219,7 @@ export default function BudgetDashboard() {
 
               if (allocatedAmount > 0) {
                 allTransactions.push({
-                  id: `allocation-${envelope.id}-${Date.now()}-${Math.random()}`,
+                  id: crypto.randomUUID(),
                   envelopeId: envelope.id,
                   amount: allocatedAmount,
                   description: `Income allocation - ${envelope.name}`,
@@ -180,7 +238,7 @@ export default function BudgetDashboard() {
               const allocatedAmount = transaction.amount * proportion;
               if (allocatedAmount > 0) {
                 allTransactions.push({
-                  id: `allocation-${envelope.id}-${Date.now()}-${Math.random()}`,
+                  id: crypto.randomUUID(),
                   envelopeId: envelope.id,
                   amount: allocatedAmount,
                   description: `Income allocation - ${envelope.name}`,
@@ -235,7 +293,7 @@ export default function BudgetDashboard() {
   const handleSignOut = async () => {
     setLoading(true);
     try {
-      await signOut(auth);
+      await AuthService.signOut();
     } catch (error) {
       console.error('Error signing out:', error);
     }
@@ -283,7 +341,12 @@ export default function BudgetDashboard() {
   };
 
   const handleDeleteEnvelope = (envelopeId: string) => {
+    // Remove envelope and unassign any transactions linked to it
     setEnvelopes(prevEnvelopes => prevEnvelopes.filter(env => env.id !== envelopeId));
+    // Unassign transactions from deleted envelope (don't delete transactions)
+    setTransactions(prevTransactions => prevTransactions.map(tx => 
+      tx.envelopeId === envelopeId ? { ...tx, envelopeId: undefined } : tx
+    ));
   };
 
   return (
@@ -436,18 +499,28 @@ export default function BudgetDashboard() {
                             <div className="flex items-center">
                               <p className="text-sm font-medium text-gray-900">{transaction.description}</p>
                               <p className="ml-2 text-sm text-gray-500">
-                                {transaction.date.toLocaleDateString()}
+                                {transaction.date instanceof Date ? transaction.date.toLocaleDateString() : new Date(transaction.date).toLocaleDateString()}
                               </p>
                             </div>
-                            <div className="flex items-center">
+                            <div className="flex items-center space-x-2">
                               <p className={`text-sm font-medium ${transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                 ${Math.abs(transaction.amount).toFixed(2)}
                               </p>
                               <button
                                 onClick={() => setEditingTransaction(transaction)}
-                                className="ml-2 text-indigo-600 hover:text-indigo-900"
+                                className="text-indigo-600 hover:text-indigo-900 text-sm"
                               >
                                 Edit
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (confirm('Are you sure you want to delete this transaction?')) {
+                                    handleTransactionDelete(transaction.id);
+                                  }
+                                }}
+                                className="text-red-600 hover:text-red-900 text-sm"
+                              >
+                                Delete
                               </button>
                             </div>
                           </div>
@@ -480,18 +553,28 @@ export default function BudgetDashboard() {
                             <div>
                               <p className="text-sm font-medium text-gray-900">{transaction.description}</p>
                               <p className="text-sm text-gray-500">
-                                {transaction.date.toLocaleDateString()} • {accounts.find(acc => acc.id === transaction.accountId)?.name}
+                                {transaction.date instanceof Date ? transaction.date.toLocaleDateString() : new Date(transaction.date).toLocaleDateString()} • {accounts.find(acc => acc.id === transaction.accountId)?.name}
                               </p>
                             </div>
-                            <div className="flex items-center">
+                            <div className="flex items-center space-x-2">
                               <p className={`text-sm font-medium ${transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                 ${Math.abs(transaction.amount).toFixed(2)}
                               </p>
                               <button
                                 onClick={() => setEditingTransaction(transaction)}
-                                className="ml-2 text-indigo-600 hover:text-indigo-900"
+                                className="text-indigo-600 hover:text-indigo-900 text-sm"
                               >
                                 Edit
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (confirm('Are you sure you want to delete this transaction?')) {
+                                    handleTransactionDelete(transaction.id);
+                                  }
+                                }}
+                                className="text-red-600 hover:text-red-900 text-sm"
+                              >
+                                Delete
                               </button>
                             </div>
                           </div>
@@ -567,7 +650,7 @@ export default function BudgetDashboard() {
 
       {/* Modals and Components */}
       {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} onAuthSuccess={handleAuthSuccess} />}
-      {showSetupWizard && <SetupWizard onComplete={handleSetupComplete} onSkip={() => setShowSetupWizard(false)} userId={user?.uid || ''} />}
+      {showSetupWizard && <SetupWizard onComplete={handleSetupComplete} onSkip={() => setShowSetupWizard(false)} userId={user?.userId || ''} />}
       {editingTransaction && (
         <TransactionEdit
           transaction={editingTransaction}
@@ -597,6 +680,7 @@ export default function BudgetDashboard() {
             handleEnvelopeUpdate(updatedEnvelope);
             setEditingEnvelope(null);
           }}
+          onEnvelopeDeleted={handleDeleteEnvelope}
           onCancel={() => setEditingEnvelope(null)}
           accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
         />

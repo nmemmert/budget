@@ -23,8 +23,8 @@ export default function DataInput({ onTransactionsAdded, envelopes, accounts }: 
   const [inputMode, setInputMode] = useState<InputMode>('manual');
 
   const handleFileTransactionsParsed = (parsedTransactions: ParsedTransaction[]) => {
-    const transactions = parsedTransactions.map((t, index) => ({
-      id: `imported-${Date.now()}-${index}`,
+    const transactions = parsedTransactions.map((t) => ({
+      id: crypto.randomUUID(),
       amount: t.amount,
       description: t.description,
       date: t.date,
@@ -43,7 +43,7 @@ export default function DataInput({ onTransactionsAdded, envelopes, accounts }: 
     accountId: string;
   }) => {
     const newTransaction = {
-      id: `manual-${Date.now()}`,
+      id: crypto.randomUUID(),
       ...transaction,
     };
 

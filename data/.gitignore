@@ -1,0 +1,5 @@
+# Exclude all user data files
+*.json
+
+# Keep this .gitignore file
+!.gitignore
