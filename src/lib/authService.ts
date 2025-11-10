@@ -33,7 +33,10 @@ export class AuthService {
 
       return result.user;
     } catch (error) {
-      console.error('Sign up error:', error);
+      // Only log non-authentication errors to avoid console spam
+      if (!(error instanceof Error) || !error.message.includes('User already exists')) {
+        console.error('Sign up error:', error);
+      }
       throw error;
     }
   }
@@ -50,12 +53,13 @@ export class AuthService {
 
       if (!response.ok) {
         const error = await response.json();
+        // Don't log authentication errors to console as they may contain sensitive info
         throw new Error(error.error || 'Login failed');
       }
 
       const result = await response.json();
       this.currentUser = result.user;
-      
+
       // Store in localStorage for persistence
       if (typeof window !== 'undefined') {
         localStorage.setItem('user', JSON.stringify(result.user));
@@ -63,7 +67,10 @@ export class AuthService {
 
       return result.user;
     } catch (error) {
-      console.error('Sign in error:', error);
+      // Only log non-authentication errors to avoid console spam
+      if (!(error instanceof Error) || !error.message.includes('Invalid credentials')) {
+        console.error('Sign in error:', error);
+      }
       throw error;
     }
   }

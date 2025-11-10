@@ -90,7 +90,10 @@ export default function BudgetDashboard() {
             }));
             setTransactions(transactionsWithDates);
             setSetupCompleted(userData.setupCompleted || false);
-            setShowSetupWizard(!(userData.setupCompleted || false));
+            
+            // Show setup wizard if setup is not completed OR if there are no accounts
+            const shouldShowWizard = !(userData.setupCompleted || false) || (userData.accounts || []).length === 0;
+            setShowSetupWizard(shouldShowWizard);
           } else {
             // New user - show setup wizard
             setShowSetupWizard(true);
@@ -686,18 +689,22 @@ export default function BudgetDashboard() {
         />
       )}
 
-      {/* Always visible components */}
-      <DataInput
-        onTransactionsAdded={handleTransactionsAdded}
-        envelopes={envelopes.map(env => ({ id: env.id, name: env.name }))}
-        accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
-      />
-      <GetPaid
-        accounts={accounts}
-        envelopes={envelopes}
-        onIncomeAdded={handleTransactionsAdded}
-        onAccountUpdate={handleAccountUpdate}
-      />
+      {/* Components visible after setup completion */}
+      {setupCompleted && (
+        <>
+          <DataInput
+            onTransactionsAdded={handleTransactionsAdded}
+            envelopes={envelopes.map(env => ({ id: env.id, name: env.name }))}
+            accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
+          />
+          <GetPaid
+            accounts={accounts}
+            envelopes={envelopes}
+            onIncomeAdded={handleTransactionsAdded}
+            onAccountUpdate={handleAccountUpdate}
+          />
+        </>
+      )}
     </div>
   );
 }

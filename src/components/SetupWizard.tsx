@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DataService } from '../lib/dataService';
 
 interface Account {
@@ -12,6 +12,7 @@ interface Account {
   accountNumber?: string;
   color: string;
   isActive: boolean;
+  defaultPaycheckAmount?: number;
 }
 
 interface Envelope {
@@ -35,7 +36,6 @@ type WizardStep = 'welcome' | 'data-source' | 'accounts' | 'envelopes' | 'income
 
 export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardProps) {
   const [currentStep, setCurrentStep] = useState<WizardStep>('welcome');
-  const [dataSource, setDataSource] = useState<'import' | 'manual' | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [envelopes, setEnvelopes] = useState<Envelope[]>([]);
 
@@ -64,6 +64,32 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
   const [incomeAllocations, setIncomeAllocations] = useState<{ [envelopeId: string]: { type: 'percentage' | 'fixed'; value: number } }>({});
   const [defaultPaycheckAmounts, setDefaultPaycheckAmounts] = useState<{ [accountId: string]: number }>({});
 
+  // Loading and error states
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Modal ESC key handling and click outside
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (showAddAccount || showAddEnvelope) {
+          setShowAddAccount(false);
+          setShowAddEnvelope(false);
+        } else {
+          onSkip(); // Close the entire wizard
+        }
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showAddAccount, showAddEnvelope, onSkip]);
+
+  const handleBackdropClick = (event: React.MouseEvent) => {
+    if (event.target === event.currentTarget) {
+      onSkip();
+    }
+  };
+
   const accountTypes = [
     { value: 'checking', label: 'Checking Account', icon: '🏦' },
     { value: 'savings', label: 'Savings Account', icon: '💰' },
@@ -79,50 +105,76 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
   ];
 
   const handleAddAccount = () => {
-    if (newAccount.name && newAccount.type) {
-      const account: Account = {
-        id: `${newAccount.type}-${Date.now()}`,
-        name: newAccount.name,
-        type: newAccount.type as Account['type'],
-        balance: newAccount.balance || 0,
-        institution: newAccount.institution,
-        accountNumber: newAccount.accountNumber,
-        color: newAccount.color || 'bg-blue-500',
-        isActive: true,
-      };
-      setAccounts(prev => [...prev, account]);
-      setNewAccount({
-        type: 'checking',
-        balance: 0,
-        color: 'bg-blue-500',
-        isActive: true,
-      });
-      setShowAddAccount(false);
+    if (!newAccount.name || !newAccount.type) return;
+
+    // Validation: unique name
+    if (accounts.some(acc => acc.name.toLowerCase() === newAccount.name!.toLowerCase())) {
+      alert('Account name must be unique');
+      return;
     }
+
+    // Validation: balance >= 0
+    const balance = newAccount.balance || 0;
+    if (balance < 0) {
+      alert('Balance cannot be negative');
+      return;
+    }
+
+    const account: Account = {
+      id: `${newAccount.type}-${Date.now()}`,
+      name: newAccount.name,
+      type: newAccount.type as Account['type'],
+      balance,
+      institution: newAccount.institution,
+      accountNumber: newAccount.accountNumber,
+      color: newAccount.color || 'bg-blue-500',
+      isActive: true,
+    };
+    setAccounts(prev => [...prev, account]);
+    setNewAccount({
+      type: 'checking',
+      balance: 0,
+      color: 'bg-blue-500',
+      isActive: true,
+    });
+    setShowAddAccount(false);
   };
 
   const handleAddEnvelope = () => {
-    if (newEnvelope.name && newEnvelope.accountId && newEnvelope.allocated !== undefined) {
-      const envelope: Envelope = {
-        id: `env-${Date.now()}`,
-        name: newEnvelope.name,
-        allocated: newEnvelope.allocated,
-        spent: 0,
-        color: newEnvelope.color || 'bg-green-500',
-        accountId: newEnvelope.accountId,
-      };
-      setEnvelopes(prev => [...prev, envelope]);
-      setNewEnvelope({
-        allocated: 0,
-        spent: 0,
-        color: 'bg-green-500',
-      });
-      setShowAddEnvelope(false);
+    if (!newEnvelope.name || !newEnvelope.accountId || newEnvelope.allocated === undefined) return;
+
+    // Validation: unique name
+    if (envelopes.some(env => env.name.toLowerCase() === newEnvelope.name!.toLowerCase())) {
+      alert('Envelope name must be unique');
+      return;
     }
+
+    const envelope: Envelope = {
+      id: `env-${Date.now()}`,
+      name: newEnvelope.name,
+      allocated: newEnvelope.allocated,
+      spent: 0,
+      color: newEnvelope.color || 'bg-green-500',
+      accountId: newEnvelope.accountId,
+    };
+    setEnvelopes(prev => [...prev, envelope]);
+    setNewEnvelope({
+      allocated: 0,
+      spent: 0,
+      color: 'bg-green-500',
+    });
+    setShowAddEnvelope(false);
   };
 
   const handleComplete = async () => {
+    if (!userId) {
+      setErrorMessage('No user ID provided');
+      return;
+    }
+    setIsSaving(true);
+    setErrorMessage(null);
     try {
+      DataService.setUserId(userId);
       // Apply income allocation settings to envelopes
       const envelopesWithAllocations = envelopes.map(envelope => {
         const allocation = incomeAllocations[envelope.id];
@@ -148,7 +200,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
         return account;
       });
 
-      await DataService.saveUserData(userId, {
+      await DataService.saveUserData({
         accounts: accountsWithDefaults,
         envelopes: envelopesWithAllocations,
         transactions: [],
@@ -157,6 +209,9 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
       onComplete(accountsWithDefaults, envelopesWithAllocations);
     } catch (error) {
       console.error('Error saving setup data:', error);
+      setErrorMessage('Failed to save setup data. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -165,7 +220,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
       <div className="mb-8">
         <div className="text-6xl mb-4">💰</div>
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome to Envelope Budgeting</h1>
-        <p className="text-gray-600 mb-4">Let's set up your budget to get started with secure, organized financial tracking.</p>
+        <p className="text-gray-600 mb-4">Let&apos;s set up your budget to get started with secure, organized financial tracking.</p>
       </div>
 
       <div className="space-y-4">
@@ -189,13 +244,12 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
     <div className="text-center">
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-gray-900 mb-2">How would you like to set up your data?</h2>
-        <p className="text-gray-600">Choose how you'd like to get started with your budget.</p>
+        <p className="text-gray-600">Choose how you&apos;d like to get started with your budget.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <button
           onClick={() => {
-            setDataSource('import');
             setCurrentStep('accounts');
           }}
           className="p-6 border-2 border-gray-200 rounded-lg hover:border-blue-500 transition-colors"
@@ -207,7 +261,6 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
 
         <button
           onClick={() => {
-            setDataSource('manual');
             setCurrentStep('accounts');
           }}
           className="p-6 border-2 border-gray-200 rounded-lg hover:border-blue-500 transition-colors"
@@ -436,7 +489,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
               <option key={account.id} value={account.id}>{account.name}</option>
             ))}
           </select>
-          <p className="text-sm text-gray-500 mt-2">We'll create a set of common envelopes (Rent, Groceries, Utilities, Savings, Transport, Entertainment, Emergency). You can edit amounts later.</p>
+          <p className="text-sm text-gray-500 mt-2">We&apos;ll create a set of common envelopes (Rent, Groceries, Utilities, Savings, Transport, Entertainment, Emergency). You can edit amounts later.</p>
         </div>
       </div>
 
@@ -488,7 +541,8 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
             }
             setCurrentStep('income-setup');
           }}
-          className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
+          disabled={includeStandardEnvelopes && !standardEnvelopeAccountId}
+          className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Next: Set Up Income →
         </button>
@@ -668,6 +722,27 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
             );
           })}
         </div>
+
+        {/* Total Percentage Warning */}
+        {(() => {
+          const totalPercentage = envelopes.reduce((sum, envelope) => {
+            const allocation = incomeAllocations[envelope.id];
+            if (allocation?.type === 'percentage') {
+              return sum + (allocation.value || 0);
+            }
+            return sum;
+          }, 0);
+          if (totalPercentage > 100) {
+            return (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                <p className="text-sm text-red-700">
+                  Warning: Total percentage allocation ({totalPercentage.toFixed(1)}%) exceeds 100%. Please adjust your allocations.
+                </p>
+              </div>
+            );
+          }
+          return null;
+        })()}
       </div>
 
       {/* Navigation */}
@@ -809,11 +884,17 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
       </div>
 
       <div className="space-y-4">
+        {errorMessage && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+            <p className="text-sm text-red-700">{errorMessage}</p>
+          </div>
+        )}
         <button
           onClick={handleComplete}
-          className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors"
+          disabled={isSaving}
+          className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Start Budgeting!
+          {isSaving ? 'Saving...' : 'Start Budgeting!'}
         </button>
         <button
           onClick={() => setCurrentStep('envelopes')}
@@ -826,8 +907,17 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8 max-w-2xl w-full">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={handleBackdropClick}>
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        {/* Close button */}
+        <button
+          onClick={onSkip}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+          aria-label="Close setup wizard"
+        >
+          ✕
+        </button>
+
         {/* Progress Indicator */}
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">

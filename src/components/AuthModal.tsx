@@ -37,7 +37,14 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalP
       onAuthSuccess();
       onClose();
     } catch (error: any) {
-      setError(error.message);
+      // Provide more user-friendly error messages
+      let errorMessage = error.message;
+      if (error.message === 'Invalid credentials') {
+        errorMessage = 'The email or password you entered is incorrect. Please try again.';
+      } else if (error.message === 'User already exists') {
+        errorMessage = 'An account with this email already exists. Please try logging in instead.';
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
