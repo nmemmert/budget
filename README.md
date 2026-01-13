@@ -286,6 +286,30 @@ Date,Amount,Description,Category
 - Export to JSON format for data backup or integration
 - Includes complete transaction history and envelope details
 
+## Deployment
+
+### ZimaOS Deployment (Recommended)
+
+Capsule is designed for self-hosted deployment on ZimaOS and similar platforms.
+
+**Quick Deploy:**
+```bash
+./deploy.sh
+```
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed ZimaOS deployment instructions.
+
+**Features:**
+- Docker containerization for easy deployment
+- Persistent data storage in `./data` directory
+- Health checks and auto-restart
+- Encrypted local storage (no cloud required)
+
+**Access:**
+- Default port: 7654
+- Local: `http://localhost:7654`
+- Network: `http://your-device-ip:7654`
+
 ## Contributing
 
 1. Fork the repository
