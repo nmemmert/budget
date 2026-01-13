@@ -1,27 +1,33 @@
 # Capsule Budget - ZimaOS Deployment Guide
 
-## One-Line Installation (Easiest)
+## Installation Methods
 
-Run this single command on your ZimaOS device:
+### Method 1: Clone and Deploy (Recommended for Private Repos)
+
+If the repository is private, clone it first:
+
+```bash
+# Clone the repository
+git clone https://github.com/nmemmert/budget.git capsule-budget
+cd capsule-budget
+
+# Run the deploy script
+./deploy.sh
+```
+
+**Access at:** `http://your-zima-ip:7654`
+
+### Method 2: One-Line Installation (Public Repos Only)
+
+If the repository is public:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nmemmert/budget/master/install.sh | bash
 ```
 
-**What it does:**
-1. ✅ Checks for Docker and Docker Compose
-2. ✅ Downloads Capsule Budget
-3. ✅ Generates secure encryption key
-4. ✅ Creates data directory
-5. ✅ Builds Docker image
-6. ✅ Starts the container
-7. ✅ Shows access URLs
-
-**Then access at:** `http://your-zima-ip:7654`
-
 ---
 
-## Quick Deploy
+## Quick Deploy (Manual)
 
 1. **Clone or upload this repository to your ZimaOS device**
 
