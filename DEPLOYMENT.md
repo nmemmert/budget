@@ -1,5 +1,26 @@
 # Capsule Budget - ZimaOS Deployment Guide
 
+## One-Line Installation (Easiest)
+
+Run this single command on your ZimaOS device:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nmemmert/budget/master/install.sh | bash
+```
+
+**What it does:**
+1. ✅ Checks for Docker and Docker Compose
+2. ✅ Downloads Capsule Budget
+3. ✅ Generates secure encryption key
+4. ✅ Creates data directory
+5. ✅ Builds Docker image
+6. ✅ Starts the container
+7. ✅ Shows access URLs
+
+**Then access at:** `http://your-zima-ip:7654`
+
+---
+
 ## Quick Deploy
 
 1. **Clone or upload this repository to your ZimaOS device**

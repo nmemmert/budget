@@ -59,11 +59,26 @@ A modern, privacy-focused envelope budgeting application built with Next.js, Typ
 
 ## Getting Started
 
-### Prerequisites
+### One-Line Installation (Docker - Recommended)
 
-- Node.js 18+ and npm
+For ZimaOS or any system with Docker:
 
-### Installation
+```bash
+curl -fsSL https://raw.githubusercontent.com/nmemmert/budget/master/install.sh | bash
+```
+
+This will automatically:
+- Check for Docker and Docker Compose
+- Download Capsule Budget
+- Generate a secure encryption key
+- Build and start the container
+- Set up data persistence
+
+**Access at:** `http://localhost:7654` or `http://your-device-ip:7654`
+
+### Manual Installation (Development)
+
+If you want to run from source:
 
 1. Clone the repository:
 ```bash
