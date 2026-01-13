@@ -120,7 +120,8 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }: AuthModalP
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+            className="w-full text-white py-2 px-4 rounded-md hover:opacity-90 focus:outline-none focus:ring-2 disabled:opacity-50 transition-opacity"
+            style={{ backgroundColor: 'var(--color-primary-blue)' }}
           >
             {loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account')}
           </button>

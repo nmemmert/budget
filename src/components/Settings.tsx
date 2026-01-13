@@ -257,7 +257,8 @@ export default function Settings({ user, onAccountDeleted }: SettingsProps) {
             <button
               type="submit"
               disabled={loading || !resetCode || !newPassword}
-              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              className="w-full text-white py-2 px-4 rounded-md hover:opacity-90 disabled:opacity-50 transition-opacity"
+              style={{ backgroundColor: 'var(--color-primary-blue)' }}
             >
               {loading ? 'Resetting...' : 'Reset Password'}
             </button>
@@ -277,21 +278,23 @@ export default function Settings({ user, onAccountDeleted }: SettingsProps) {
             <div className="space-y-3">
               <button
                 onClick={() => handleExportData('json')}
-                className="w-full bg-green-600 text-white py-3 px-4 rounded-md hover:bg-green-700 transition-colors text-left flex justify-between items-center"
+                className="w-full text-white py-3 px-4 rounded-md hover:opacity-90 transition-opacity text-left flex justify-between items-center"
+                style={{ backgroundColor: 'var(--color-finance-green)' }}
               >
                 <span>📋 Export as JSON (Full Backup)</span>
                 <span className="text-sm">Recommended</span>
               </button>
               <button
                 onClick={() => handleExportData('csv')}
-                className="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 transition-colors text-left"
+                className="w-full text-white py-3 px-4 rounded-md hover:opacity-90 transition-opacity text-left"
+                style={{ backgroundColor: 'var(--color-primary-blue)' }}
               >
                 📊 Export Transactions as CSV
               </button>
             </div>
 
-            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
-              <p className="text-sm text-blue-800">
+            <div className="mt-6 p-4 rounded-md border" style={{ backgroundColor: 'rgba(30, 115, 190, 0.05)', borderColor: 'var(--color-cloud-blue)' }}>
+              <p className="text-sm" style={{ color: 'var(--color-primary-blue)' }}>
                 <strong>💡 Tip:</strong> Regularly export your data as a backup. You can import it later if needed.
               </p>
             </div>

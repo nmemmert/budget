@@ -86,7 +86,8 @@ export default function DemoWizard({ onApplyDemo, onSkip, accountId }: DemoWizar
         <div className="flex gap-3 justify-center pt-4">
           <button
             onClick={() => setShowDemo(true)}
-            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+            className="text-white px-6 py-3 rounded-lg hover:opacity-90 transition-opacity"
+            style={{ backgroundColor: 'var(--color-primary-blue)' }}
           >
             Show Me Demo Data
           </button>
@@ -111,25 +112,25 @@ export default function DemoWizard({ onApplyDemo, onSkip, accountId }: DemoWizar
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-          <h3 className="font-semibold text-blue-900 mb-3">🏦 Accounts</h3>
+        <div className="rounded-lg p-4 border" style={{ backgroundColor: 'rgba(30, 115, 190, 0.05)', borderColor: 'var(--color-cloud-blue)' }}>
+          <h3 className="font-semibold mb-3" style={{ color: 'var(--color-primary-blue)' }}>🏦 Accounts</h3>
           <ul className="space-y-2">
             {DEMO_DATA.accounts.map((acc) => (
-              <li key={acc.name} className="text-sm text-blue-800">
+              <li key={acc.name} className="text-sm text-gray-700">
                 <span className="font-medium">{acc.name}</span> - ${acc.balance.toLocaleString()}
               </li>
             ))}
           </ul>
         </div>
 
-        <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-          <h3 className="font-semibold text-green-900 mb-3">📦 Envelopes</h3>
+        <div className="rounded-lg p-4 border" style={{ backgroundColor: 'rgba(40, 167, 69, 0.05)', borderColor: 'var(--color-finance-green)' }}>
+          <h3 className="font-semibold mb-3" style={{ color: 'var(--color-finance-green)' }}>📦 Envelopes</h3>
           <ul className="space-y-2">
             {DEMO_DATA.envelopes.map((env) => (
-              <li key={env.name} className="text-sm text-green-800">
+              <li key={env.name} className="text-sm text-gray-700">
                 <span className="font-medium">{env.name}</span> - ${env.allocated}/mo
                 {env.isRecurring && (
-                  <span className="ml-2 text-xs bg-green-200 px-2 py-1 rounded">Recurring</span>
+                  <span className="ml-2 text-xs px-2 py-1 rounded" style={{ backgroundColor: 'var(--color-finance-green)', color: 'white' }}>Recurring</span>
                 )}
               </li>
             ))}
@@ -152,7 +153,8 @@ export default function DemoWizard({ onApplyDemo, onSkip, accountId }: DemoWizar
         </button>
         <button
           onClick={handleApplyDemo}
-          className="flex-1 bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition-colors font-semibold"
+          className="flex-1 text-white py-3 px-4 rounded-lg hover:opacity-90 transition-opacity font-semibold"
+          style={{ backgroundColor: 'var(--color-finance-green)' }}
         >
           Apply Demo Data →
         </button>

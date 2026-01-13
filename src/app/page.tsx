@@ -406,8 +406,8 @@ export default function BudgetDashboard() {
     <div className="px-4 py-12 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
         <div className="space-y-6">
-          <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-50 text-blue-700">Capsule</span>
-          <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 leading-tight">
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium" style={{ backgroundColor: 'rgba(30, 115, 190, 0.1)', color: 'var(--color-primary-blue)' }}>Capsule</span>
+          <h1 className="text-4xl sm:text-5xl font-bold leading-tight" style={{ color: 'var(--color-dark-navy)' }}>
             Take control of your money with smart envelopes
           </h1>
           <p className="text-lg text-gray-600 leading-relaxed">
@@ -416,44 +416,46 @@ export default function BudgetDashboard() {
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={() => setShowAuthModal(true)}
-              className="inline-flex justify-center items-center px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 transition-colors"
+              className="inline-flex justify-center items-center px-5 py-3 rounded-lg text-white font-semibold shadow hover:opacity-90 transition-opacity"
+              style={{ backgroundColor: 'var(--color-primary-blue)' }}
             >
               Get Started
             </button>
             <button
               onClick={() => setShowAuthModal(true)}
-              className="inline-flex justify-center items-center px-5 py-3 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:border-gray-400 hover:text-gray-900 transition-colors"
+              className="inline-flex justify-center items-center px-5 py-3 rounded-lg border-2 font-semibold transition-colors"
+              style={{ borderColor: 'var(--color-primary-blue)', color: 'var(--color-primary-blue)' }}
             >
               Sign In
             </button>
           </div>
           <div className="flex items-center gap-4 text-sm text-gray-500">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 bg-green-500 rounded-full" aria-hidden="true"></span>
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-finance-green)' }} aria-hidden="true"></span>
               Auto-save & offline-ready data
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 bg-indigo-500 rounded-full" aria-hidden="true"></span>
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-primary-blue)' }} aria-hidden="true"></span>
               Guided setup wizard
             </div>
           </div>
         </div>
         <div className="bg-white shadow-xl rounded-2xl p-6 border border-gray-100">
           <div className="grid grid-cols-1 gap-4">
-            <div className="p-4 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200">
-              <p className="text-sm text-blue-800 font-medium">Total Balance</p>
-              <p className="text-3xl font-bold text-blue-900 mt-2">$0.00</p>
-              <p className="text-xs text-blue-700 mt-1">Link accounts to see your starting balance</p>
+            <div className="p-4 rounded-xl border" style={{ backgroundColor: 'rgba(30, 115, 190, 0.05)', borderColor: 'var(--color-cloud-blue)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-primary-blue)' }}>Total Balance</p>
+              <p className="text-3xl font-bold mt-2" style={{ color: 'var(--color-dark-navy)' }}>$0.00</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-primary-blue)' }}>Link accounts to see your starting balance</p>
             </div>
-            <div className="p-4 rounded-xl bg-gradient-to-br from-green-50 to-green-100 border border-green-200">
-              <p className="text-sm text-green-800 font-medium">Envelopes</p>
-              <p className="text-3xl font-bold text-green-900 mt-2">Organize spending</p>
-              <p className="text-xs text-green-700 mt-1">Create categories with color-coded envelopes</p>
+            <div className="p-4 rounded-xl border" style={{ backgroundColor: 'rgba(40, 167, 69, 0.05)', borderColor: 'var(--color-finance-green)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-finance-green)' }}>Envelopes</p>
+              <p className="text-3xl font-bold mt-2" style={{ color: 'var(--color-dark-navy)' }}>Organize spending</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-finance-green)' }}>Create categories with color-coded envelopes</p>
             </div>
-            <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-200">
-              <p className="text-sm text-indigo-800 font-medium">Income Auto-Allocation</p>
-              <p className="text-3xl font-bold text-indigo-900 mt-2">Smart distribution</p>
-              <p className="text-xs text-indigo-700 mt-1">Allocate paychecks by percentage or fixed amounts</p>
+            <div className="p-4 rounded-xl border" style={{ backgroundColor: 'rgba(167, 216, 248, 0.1)', borderColor: 'var(--color-cloud-blue)' }}>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-primary-blue)' }}>Income Auto-Allocation</p>
+              <p className="text-3xl font-bold mt-2" style={{ color: 'var(--color-dark-navy)' }}>Smart distribution</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-primary-blue)' }}>Allocate paychecks by percentage or fixed amounts</p>
             </div>
           </div>
         </div>
@@ -464,54 +466,81 @@ export default function BudgetDashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Navigation */}
-      <nav className="bg-white shadow-sm border-b">
+      <nav className="bg-white shadow-sm border-b" style={{ borderBottomColor: 'var(--color-cloud-blue)' }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             <div className="flex">
               <div className="flex-shrink-0 flex items-center">
                 <div>
-                  <h1 className="text-xl font-bold text-gray-900">Capsule</h1>
-                  <p className="text-xs font-normal text-gray-500">by NeCloud</p>
+                  <h1 className="text-xl font-bold" style={{ color: 'var(--color-dark-navy)' }}>
+                    <span className="logo-text">Capsule</span>
+                  </h1>
+                  <p className="text-xs font-normal" style={{ color: 'var(--color-neutral-gray)' }}>by NeCloud</p>
                 </div>
               </div>
               <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
                 <button
                   onClick={() => setCurrentView('dashboard')}
-                  className={`border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                    currentView === 'dashboard' ? 'border-indigo-500 text-gray-900' : ''
+                  className={`border-transparent inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
+                    currentView === 'dashboard' 
+                      ? 'border-b-2 text-gray-900' 
+                      : 'text-gray-500 hover:text-gray-700'
                   }`}
+                  style={{
+                    borderBottomColor: currentView === 'dashboard' ? 'var(--color-primary-blue)' : 'transparent'
+                  }}
                 >
                   Dashboard
                 </button>
                 <button
                   onClick={() => setCurrentView('accounts')}
-                  className={`border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                    currentView === 'accounts' ? 'border-indigo-500 text-gray-900' : ''
+                  className={`border-transparent inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
+                    currentView === 'accounts' 
+                      ? 'border-b-2 text-gray-900' 
+                      : 'text-gray-500 hover:text-gray-700'
                   }`}
+                  style={{
+                    borderBottomColor: currentView === 'accounts' ? 'var(--color-primary-blue)' : 'transparent'
+                  }}
                 >
                   Accounts
                 </button>
                 <button
                   onClick={() => setCurrentView('transactions')}
-                  className={`border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                    currentView === 'transactions' ? 'border-indigo-500 text-gray-900' : ''
+                  className={`border-transparent inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
+                    currentView === 'transactions' 
+                      ? 'border-b-2 text-gray-900' 
+                      : 'text-gray-500 hover:text-gray-700'
                   }`}
+                  style={{
+                    borderBottomColor: currentView === 'transactions' ? 'var(--color-primary-blue)' : 'transparent'
+                  }}
                 >
                   Transactions
                 </button>
                 <button
                   onClick={() => setCurrentView('envelopes')}
-                  className={`border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                    currentView === 'envelopes' ? 'border-indigo-500 text-gray-900' : ''
+                  className={`border-transparent inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
+                    currentView === 'envelopes' 
+                      ? 'border-b-2 text-gray-900' 
+                      : 'text-gray-500 hover:text-gray-700'
                   }`}
+                  style={{
+                    borderBottomColor: currentView === 'envelopes' ? 'var(--color-primary-blue)' : 'transparent'
+                  }}
                 >
                   Envelopes
                 </button>
                 <button
                   onClick={() => setCurrentView('settings')}
-                  className={`border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                    currentView === 'settings' ? 'border-indigo-500 text-gray-900' : ''
+                  className={`border-transparent inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
+                    currentView === 'settings' 
+                      ? 'border-b-2 text-gray-900' 
+                      : 'text-gray-500 hover:text-gray-700'
                   }`}
+                  style={{
+                    borderBottomColor: currentView === 'settings' ? 'var(--color-primary-blue)' : 'transparent'
+                  }}
                 >
                   Settings
                 </button>
@@ -521,7 +550,8 @@ export default function BudgetDashboard() {
               {user && setupCompleted && (
                 <button
                   onClick={() => setShowGetPaidModal(true)}
-                  className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-md text-sm font-medium"
+                  className="text-white px-3 py-2 rounded-md text-sm font-medium hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: 'var(--color-finance-green)' }}
                 >
                   💰 Get Paid
                 </button>
@@ -529,14 +559,16 @@ export default function BudgetDashboard() {
               {user ? (
                 <button
                   onClick={handleSignOut}
-                  className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md text-sm font-medium"
+                  className="text-white px-3 py-2 rounded-md text-sm font-medium hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: '#DC2626' }}
                 >
                   Sign Out
                 </button>
               ) : (
                 <button
                   onClick={() => setShowAuthModal(true)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md text-sm font-medium"
+                  className="text-white px-3 py-2 rounded-md text-sm font-medium hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: 'var(--color-primary-blue)' }}
                 >
                   Sign In
                 </button>

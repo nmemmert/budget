@@ -1,6 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;700&display=swap');
 @import "tailwindcss";
 
 :root {
+  /* Capsule Brand Colors */
+  --color-primary-blue: #1E73BE;
+  --color-finance-green: #28A745;
+  --color-cloud-blue: #A7D8F8;
+  --color-dark-navy: #0F2C4C;
+  --color-neutral-gray: #F4F4F4;
+  
+  /* Legacy variables for compatibility */
   --background: #ffffff;
   --foreground: #171717;
 }
@@ -8,8 +17,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: "Roboto", sans-serif;
+  --font-mono: "Roboto Mono", monospace;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,7 +31,25 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Roboto", Arial, sans-serif;
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Montserrat", sans-serif;
+  font-weight: 600;
+}
+
+.logo-text {
+  font-family: "Montserrat", sans-serif;
+  font-weight: 700;
+  color: var(--color-dark-navy);
+}
+
+.tagline {
+  font-family: "Roboto", sans-serif;
+  font-weight: 400;
+  color: var(--color-finance-green);
 }
 
 /* Ensure form controls stay readable across light/dark modes */
@@ -32,6 +59,7 @@ textarea {
   color: #111827;
   background-color: #ffffff;
   border: 1px solid #d1d5db;
+  font-family: "Roboto", sans-serif;
 }
 
 input::placeholder,
