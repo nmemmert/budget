@@ -43,6 +43,82 @@ If you prefer manual setup:
    docker-compose up -d
    ```
 
+## Data Persistence
+
+**IMPORTANT: Your data is safely stored outside the Docker container**
+
+### How It Works
+
+The Docker setup uses a **bind mount** to persist data:
+
+```yaml
+volumes:
+  - ./data:/app/data  # Host directory : Container directory
+```
+
+- **Host Location**: `./data/` (on your ZimaOS filesystem)
+- **Container Location**: `/app/data/` (inside the container)
+- **What's Stored**: 
+  - User credentials (hashed)
+  - Budget data (encrypted)
+  - Transaction history
+  - Envelope configurations
+
+### Data Survives
+
+✅ Container restarts  
+✅ Container rebuilds  
+✅ Docker Compose down/up  
+✅ System reboots (with restart: unless-stopped)  
+
+### Data is Lost If
+
+❌ You delete the `./data` directory  
+❌ You run `docker-compose down -v` (removes volumes)
+
+### Testing Persistence
+
+Run the included test script:
+```bash
+./test-persistence.sh
+```
+
+This verifies that:
+1. Data directory is correctly mounted
+2. Files created in container appear on host
+3. Data survives container restarts
+
+### Backup Your Data
+
+**Recommended backup schedule:**
+
+```bash
+# Quick backup
+cp -r data data-backup-$(date +%Y%m%d)
+
+# Compressed backup
+tar -czf capsule-backup-$(date +%Y%m%d).tar.gz data/
+
+# Restore from backup
+tar -xzf capsule-backup-YYYYMMDD.tar.gz
+```
+
+**Using ZimaOS:**
+- Enable automatic snapshots for the Capsule directory
+- Or use ZimaOS built-in backup features
+
+### Data Location on ZimaOS
+
+Depending on where you deploy:
+- **SMB/File Manager**: Check the upload location
+- **SSH Deployment**: Usually `/mnt/your-pool/apps/capsule/data`
+- **Docker Apps**: May be in `/var/lib/docker/volumes/`
+
+To find exact location:
+```bash
+docker inspect capsule-budget | grep -A 10 "Mounts"
+```
+
 ## ZimaOS Integration
 
 ### Using ZimaOS Apps

@@ -44,6 +44,19 @@ echo "🚀 Starting Capsule..."
 docker-compose up -d
 
 echo ""
+echo "⏳ Waiting for container to start..."
+sleep 5
+
+# Verify data directory is mounted
+echo ""
+echo "🔍 Verifying data persistence..."
+if docker-compose exec capsule ls -la /app/data >/dev/null 2>&1; then
+    echo "✅ Data directory is correctly mounted in container"
+else
+    echo "⚠️  Warning: Could not verify data directory mount"
+fi
+
+echo ""
 echo "✅ Deployment complete!"
 echo ""
 echo "📊 Capsule is running at:"
@@ -57,4 +70,8 @@ echo "   docker-compose restart       # Restart container"
 echo "   docker-compose down          # Stop and remove container"
 echo ""
 echo "💾 Your data is stored in: ./data/"
+echo "   - This directory persists across container restarts"
+echo "   - Back it up regularly!"
+echo ""
+echo "🧪 To test data persistence: ./test-persistence.sh"
 echo ""
