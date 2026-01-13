@@ -7,6 +7,20 @@ set -e
 echo "🚀 Deploying Capsule to ZimaOS..."
 echo ""
 
+# Detect docker compose command
+if command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE="docker-compose"
+elif docker compose version &> /dev/null 2>&1; then
+    DOCKER_COMPOSE="docker compose"
+else
+    echo "❌ Docker Compose not found"
+    echo "Please install Docker Compose: https://docs.docker.com/compose/install/"
+    exit 1
+fi
+
+echo "✅ Using: $DOCKER_COMPOSE"
+echo ""
+
 # Check if .env file exists
 if [ ! -f .env ]; then
     echo "⚠️  .env file not found!"
@@ -50,11 +64,11 @@ echo ""
 
 # Build and start containers
 echo "🔨 Building Docker image..."
-docker-compose build
+$DOCKER_COMPOSE build
 
 echo ""
 echo "🚀 Starting Capsule..."
-docker-compose up -d
+$DOCKER_COMPOSE up -d
 
 echo ""
 echo "⏳ Waiting for container to start..."
@@ -63,7 +77,7 @@ sleep 5
 # Verify data directory is mounted
 echo ""
 echo "🔍 Verifying data persistence..."
-if docker-compose exec capsule ls -la /app/data >/dev/null 2>&1; then
+if $DOCKER_COMPOSE exec capsule ls -la /app/data >/dev/null 2>&1; then
     echo "✅ Data directory is correctly mounted in container"
 else
     echo "⚠️  Warning: Could not verify data directory mount"
@@ -77,10 +91,10 @@ echo "   http://localhost:7654"
 echo "   http://$(hostname -I | awk '{print $1}'):7654"
 echo ""
 echo "🔧 Useful commands:"
-echo "   docker-compose logs -f       # View logs"
-echo "   docker-compose stop          # Stop container"
-echo "   docker-compose restart       # Restart container"
-echo "   docker-compose down          # Stop and remove container"
+echo "   $DOCKER_COMPOSE logs -f       # View logs"
+echo "   $DOCKER_COMPOSE stop          # Stop container"
+echo "   $DOCKER_COMPOSE restart       # Restart container"
+echo "   $DOCKER_COMPOSE down          # Stop and remove container"
 echo ""
 echo "💾 Your data is stored in: ./data/"
 echo "   - This directory persists across container restarts"
