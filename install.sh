@@ -93,18 +93,28 @@ if [ ! -f .env ]; then
     cp .env.example .env
     
     # Generate encryption key
+    echo "🔑 Generating encryption key..."
+    
     if command -v openssl &> /dev/null; then
+        # Use openssl if available
         ENCRYPTION_KEY=$(openssl rand -base64 32)
-        # Update .env with generated key
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "s/change-this-to-a-secure-random-key/$ENCRYPTION_KEY/" .env
-        else
-            sed -i "s/change-this-to-a-secure-random-key/$ENCRYPTION_KEY/" .env
-        fi
-        echo "✅ Generated secure encryption key"
+    elif [ -r /dev/urandom ]; then
+        # Fallback to /dev/urandom
+        ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
     else
-        echo "⚠️  OpenSSL not found. Please manually set ENCRYPTION_KEY in .env file"
+        # Last resort: generate from random data
+        ENCRYPTION_KEY=$(cat /dev/random | head -c 32 | base64 | tr -d '\n' 2>/dev/null || echo "PLEASE-CHANGE-THIS-$(date +%s)-$(( RANDOM * RANDOM ))")
+        echo "⚠️  Warning: Could not generate optimal random key"
+        echo "   Please update ENCRYPTION_KEY in .env with a secure random value"
     fi
+    
+    # Update .env with generated key
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "s/change-this-to-a-secure-random-key/$ENCRYPTION_KEY/" .env
+    else
+        sed -i "s/change-this-to-a-secure-random-key/$ENCRYPTION_KEY/" .env
+    fi
+    echo "✅ Generated secure encryption key"
 else
     echo "ℹ️  .env file already exists, keeping existing configuration"
 fi

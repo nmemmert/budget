@@ -14,7 +14,20 @@ if [ ! -f .env ]; then
     cp .env.example .env
     
     # Generate a secure encryption key
-    ENCRYPTION_KEY=$(openssl rand -base64 32)
+    echo "🔑 Generating encryption key..."
+    
+    if command -v openssl &> /dev/null; then
+        # Use openssl if available
+        ENCRYPTION_KEY=$(openssl rand -base64 32)
+    elif [ -r /dev/urandom ]; then
+        # Fallback to /dev/urandom
+        ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
+    else
+        # Last resort: generate from random data
+        ENCRYPTION_KEY=$(cat /dev/random | head -c 32 | base64 | tr -d '\n' 2>/dev/null || echo "PLEASE-CHANGE-THIS-$(date +%s)-$(( RANDOM * RANDOM ))")
+        echo "⚠️  Warning: Could not generate optimal random key"
+        echo "   Please update ENCRYPTION_KEY in .env with a secure random value"
+    fi
     
     # Update .env with generated key
     if [[ "$OSTYPE" == "darwin"* ]]; then
