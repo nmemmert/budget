@@ -364,18 +364,11 @@ export default function GetPaid({
                     required
                   >
                     <option value="">Select account...</option>
-                    {accounts
-                      .filter(
-                        (account) =>
-                          account.type !== 'credit_card' &&
-                          account.type !== 'mortgage' &&
-                          account.type !== 'loan',
-                      )
-                      .map((account) => (
-                        <option key={account.id} value={account.id}>
-                          {account.name} ({account.type.replace('_', ' ')})
-                        </option>
-                      ))}
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name} ({account.type.replace('_', ' ')})
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -500,6 +493,12 @@ export default function GetPaid({
                     </div>
                   </div>
                 </>
+              )}
+
+              {selectedAccountId && accountEnvelopes.length === 0 && (
+                <div className="rounded-lg border border-dashed p-4 text-sm text-gray-700" style={{ borderColor: 'var(--color-cloud-blue)' }}>
+                  No envelopes are linked to this account. Create envelopes for this account to distribute income here.
+                </div>
               )}
 
               <div className="flex justify-end space-x-3 pt-4 border-t">

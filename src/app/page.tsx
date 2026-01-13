@@ -55,6 +55,14 @@ interface Transaction {
 
 type ViewMode = 'dashboard' | 'accounts' | 'transactions' | 'envelopes' | 'settings';
 
+const liabilityTypes: Array<Account['type']> = ['credit_card', 'mortgage', 'loan'];
+const normalizeBalanceByType = (type: Account['type'], balance: number): number => {
+  if (liabilityTypes.includes(type)) {
+    return -Math.abs(balance || 0);
+  }
+  return balance || 0;
+};
+
 export default function BudgetDashboard() {
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
   const [user, setUser] = useState<User | null>(null);
@@ -67,6 +75,17 @@ export default function BudgetDashboard() {
   const [envelopes, setEnvelopes] = useState<Envelope[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [setupCompleted, setSetupCompleted] = useState(false);
+
+  // Dashboard section order and visibility
+  const [dashboardSections, setDashboardSections] = useState([
+    { id: 'summaryCards', label: 'Summary Cards', visible: true },
+    { id: 'charts', label: 'Analytics Charts', visible: true },
+    { id: 'budgetProgress', label: 'Budget Progress', visible: true },
+    { id: 'quickActions', label: 'Quick Actions', visible: true },
+    { id: 'recentTransactions', label: 'Recent Transactions', visible: true },
+  ]);
+  const [showDashboardSettings, setShowDashboardSettings] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
   // Modal states
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -94,7 +113,8 @@ export default function BudgetDashboard() {
             const accountsWithBaseline = (userData.accounts || []).map((account) => {
               const accountTransactions = transactionsWithDates.filter((transaction) => transaction.accountId === account.id);
               const transactionTotal = accountTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
-              const startingBalance = account.startingBalance ?? account.balance - transactionTotal;
+              const inferredBase = account.startingBalance ?? account.balance - transactionTotal;
+              const startingBalance = normalizeBalanceByType(account.type, inferredBase);
               return { ...account, startingBalance, balance: startingBalance + transactionTotal };
             });
 
@@ -182,7 +202,7 @@ export default function BudgetDashboard() {
     return accounts.map((account) => {
       const accountTransactions = accountTransactionMap.get(account.id) || [];
       const transactionTotal = accountTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
-      const baseBalance = account.startingBalance ?? account.balance ?? 0;
+      const baseBalance = normalizeBalanceByType(account.type, account.startingBalance ?? account.balance ?? 0);
       return { ...account, startingBalance: baseBalance, balance: baseBalance + transactionTotal };
     });
   };
@@ -335,7 +355,7 @@ export default function BudgetDashboard() {
 
   const handleSetupComplete = (accounts: Account[], envelopes: Envelope[]) => {
     const accountsWithBaseline = accounts.map((account) => {
-      const baseBalance = account.startingBalance ?? account.balance;
+      const baseBalance = normalizeBalanceByType(account.type, account.startingBalance ?? account.balance);
       return { ...account, startingBalance: baseBalance, balance: baseBalance };
     });
     setAccounts(accountsWithBaseline);
@@ -347,7 +367,7 @@ export default function BudgetDashboard() {
 
   const handleAccountUpdate = (updatedAccount: Account) => {
     setAccounts((prevAccounts) => {
-      const baseBalance = updatedAccount.startingBalance ?? updatedAccount.balance;
+      const baseBalance = normalizeBalanceByType(updatedAccount.type, updatedAccount.startingBalance ?? updatedAccount.balance);
       const nextAccounts = prevAccounts.map((account) =>
         account.id === updatedAccount.id ? { ...updatedAccount, startingBalance: baseBalance } : account,
       );
@@ -357,7 +377,7 @@ export default function BudgetDashboard() {
 
   const handleAccountAdd = (newAccount: Account) => {
     setAccounts((prevAccounts) => {
-      const baseBalance = newAccount.startingBalance ?? newAccount.balance;
+      const baseBalance = normalizeBalanceByType(newAccount.type, newAccount.startingBalance ?? newAccount.balance);
       const nextAccounts = [...prevAccounts, { ...newAccount, startingBalance: baseBalance }];
       return calculateAccountBalances(nextAccounts, transactions);
     });
@@ -406,7 +426,14 @@ export default function BudgetDashboard() {
     <div className="px-4 py-12 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
         <div className="space-y-6">
-          <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium" style={{ backgroundColor: 'rgba(30, 115, 190, 0.1)', color: 'var(--color-primary-blue)' }}>Capsule</span>
+          <div className="flex items-center space-x-3">
+            <img 
+              src="/images/capsule-logo.svg" 
+              alt="Capsule Logo" 
+              className="w-12 h-12"
+            />
+            <span className="text-lg font-bold" style={{ color: 'var(--color-dark-navy)' }}>Capsule</span>
+          </div>
           <h1 className="text-4xl sm:text-5xl font-bold leading-tight" style={{ color: 'var(--color-dark-navy)' }}>
             Take control of your money with smart envelopes
           </h1>
@@ -441,6 +468,17 @@ export default function BudgetDashboard() {
           </div>
         </div>
         <div className="bg-white shadow-xl rounded-2xl p-6 border border-gray-100">
+          <div className="flex flex-col items-center justify-center mb-8">
+            <img 
+              src="/images/capsule-logo.svg" 
+              alt="Capsule Logo" 
+              className="w-24 h-24 mb-4"
+            />
+            <h2 className="text-2xl font-bold text-center" style={{ color: 'var(--color-dark-navy)' }}>
+              Capsule
+            </h2>
+            <p className="text-sm" style={{ color: 'var(--color-finance-green)' }}>Smart Envelope Budgeting</p>
+          </div>
           <div className="grid grid-cols-1 gap-4">
             <div className="p-4 rounded-xl border" style={{ backgroundColor: 'rgba(30, 115, 190, 0.05)', borderColor: 'var(--color-cloud-blue)' }}>
               <p className="text-sm font-medium" style={{ color: 'var(--color-primary-blue)' }}>Total Balance</p>
@@ -470,14 +508,21 @@ export default function BudgetDashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
+            <div className="flex-shrink-0 flex items-center">
+              <div className="flex items-center space-x-3">
+                <img 
+                  src="/images/capsule-logo.svg" 
+                  alt="Capsule Logo" 
+                  className="w-10 h-10"
+                />
                 <div>
                   <h1 className="text-xl font-bold" style={{ color: 'var(--color-dark-navy)' }}>
                     <span className="logo-text">Capsule</span>
                   </h1>
-                  <p className="text-xs font-normal" style={{ color: 'var(--color-neutral-gray)' }}>by NeCloud</p>
+                  <p className="text-xs font-medium" style={{ color: 'var(--color-primary-blue)' }}>by NeCloud</p>
                 </div>
               </div>
+            </div>
               <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
                 <button
                   onClick={() => setCurrentView('dashboard')}
@@ -588,119 +633,374 @@ export default function BudgetDashboard() {
           <>
             {currentView === 'dashboard' && (
               <div className="px-4 py-6 sm:px-0">
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">Dashboard</h2>
-                
-                {/* Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                  <div className="bg-white overflow-hidden shadow rounded-lg">
-                    <div className="p-5">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0">
-                          <div className="w-8 h-8 bg-green-500 rounded-md flex items-center justify-center">
-                            <span className="text-white text-sm font-medium">$</span>
-                          </div>
-                        </div>
-                        <div className="ml-5 w-0 flex-1">
-                          <dl>
-                            <dt className="text-sm font-medium text-gray-500 truncate">Total Balance</dt>
-                            <dd className="text-lg font-medium text-gray-900">
-                              ${(accounts || []).reduce((sum, acc) => sum + acc.balance, 0).toFixed(2)}
-                            </dd>
-                          </dl>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="bg-white overflow-hidden shadow rounded-lg">
-                    <div className="p-5">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0">
-                          <div className="w-8 h-8 bg-blue-500 rounded-md flex items-center justify-center">
-                            <span className="text-white text-sm font-medium">E</span>
-                          </div>
-                        </div>
-                        <div className="ml-5 w-0 flex-1">
-                          <dl>
-                            <dt className="text-sm font-medium text-gray-500 truncate">Envelopes</dt>
-                            <dd className="text-lg font-medium text-gray-900">{envelopes.length}</dd>
-                          </dl>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="bg-white overflow-hidden shadow rounded-lg">
-                    <div className="p-5">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0">
-                          <div className="w-8 h-8 bg-purple-500 rounded-md flex items-center justify-center">
-                            <span className="text-white text-sm font-medium">T</span>
-                          </div>
-                        </div>
-                        <div className="ml-5 w-0 flex-1">
-                          <dl>
-                            <dt className="text-sm font-medium text-gray-500 truncate">Transactions</dt>
-                            <dd className="text-lg font-medium text-gray-900">{transactions.length}</dd>
-                          </dl>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                <div className="flex justify-between items-center mb-8">
+                  <h2 className="text-2xl font-bold text-gray-900">Dashboard</h2>
+                  <button
+                    onClick={() => setShowDashboardSettings(!showDashboardSettings)}
+                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
+                    title="Customize dashboard sections"
+                  >
+                    ⚙️ {showDashboardSettings ? 'Hide' : 'Customize'}
+                  </button>
                 </div>
 
-                {/* Dashboard Charts */}
-                <DashboardCharts
-                  accounts={accounts}
-                  envelopes={envelopes}
-                  transactions={transactions}
-                />
-                
-                {/* Recent Transactions */}
-                <div className="bg-white shadow overflow-hidden sm:rounded-md">
-                  <div className="px-4 py-5 sm:px-6">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900">Recent Transactions</h3>
+                {/* Dashboard Settings Panel */}
+                {showDashboardSettings && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
+                    <h3 className="text-lg font-medium text-gray-900 mb-4">Arrange Dashboard Sections</h3>
+                    <p className="text-sm text-gray-600 mb-4">Drag sections to reorder, or toggle visibility with the checkboxes</p>
+                    <div className="space-y-2">
+                      {dashboardSections.map((section, index) => (
+                        <div
+                          key={section.id}
+                          draggable
+                          onDragStart={() => setDraggedIndex(index)}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => {
+                            if (draggedIndex !== null && draggedIndex !== index) {
+                              const newSections = [...dashboardSections];
+                              const [removed] = newSections.splice(draggedIndex, 1);
+                              newSections.splice(index, 0, removed);
+                              setDashboardSections(newSections);
+                              setDraggedIndex(null);
+                            }
+                          }}
+                          className={`flex items-center justify-between p-4 bg-white border-2 rounded-lg cursor-move hover:border-blue-400 transition-all ${
+                            draggedIndex === index ? 'opacity-50 border-blue-400' : 'border-gray-200'
+                          }`}
+                        >
+                          <div className="flex items-center space-x-3">
+                            <span className="text-gray-400 text-xl">⋮⋮</span>
+                            <label className="flex items-center space-x-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={section.visible}
+                                onChange={(e) => {
+                                  const newSections = [...dashboardSections];
+                                  newSections[index].visible = e.target.checked;
+                                  setDashboardSections(newSections);
+                                }}
+                                className="w-4 h-4 text-blue-600 rounded"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                              <span className="text-sm font-medium text-gray-700">{section.label}</span>
+                            </label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => {
+                                if (index > 0) {
+                                  const newSections = [...dashboardSections];
+                                  [newSections[index - 1], newSections[index]] = [newSections[index], newSections[index - 1]];
+                                  setDashboardSections(newSections);
+                                }
+                              }}
+                              disabled={index === 0}
+                              className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                              title="Move up"
+                            >
+                              ▲
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (index < dashboardSections.length - 1) {
+                                  const newSections = [...dashboardSections];
+                                  [newSections[index], newSections[index + 1]] = [newSections[index + 1], newSections[index]];
+                                  setDashboardSections(newSections);
+                                }
+                              }}
+                              disabled={index === dashboardSections.length - 1}
+                              className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                              title="Move down"
+                            >
+                              ▼
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <ul className="divide-y divide-gray-200">
-                    {transactions.slice(-5).reverse().map((transaction) => (
-                      <li key={transaction.id}>
-                        <div className="px-4 py-4 sm:px-6">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center">
-                              <p className="text-sm font-medium text-gray-900">{transaction.description}</p>
-                              <p className="ml-2 text-sm text-gray-500">
-                                {transaction.date instanceof Date ? transaction.date.toLocaleDateString() : new Date(transaction.date).toLocaleDateString()}
-                              </p>
+                )}
+                
+                {/* Dynamic Dashboard Sections */}
+                {dashboardSections.filter(s => s.visible).map((section) => {
+                  switch (section.id) {
+                    case 'summaryCards':
+                      return (
+                        <div key={section.id} className="mb-12">
+                          {(() => {
+                            const assetTypes: Account['type'][] = ['checking', 'savings', 'investment'];
+                            const debtTypes: Account['type'][] = ['credit_card', 'mortgage', 'loan'];
+                            const totalAssets = accounts.filter(acc => assetTypes.includes(acc.type)).reduce((sum, acc) => sum + acc.balance, 0);
+                            const totalDebt = Math.abs(accounts.filter(acc => debtTypes.includes(acc.type)).reduce((sum, acc) => sum + acc.balance, 0));
+                            const totalBalance = accounts.reduce((sum, acc) => sum + acc.balance, 0);
+
+                            return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+                      {/* Total Assets */}
+                      <button
+                        onClick={() => setCurrentView('accounts')}
+                        className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+                      >
+                        <div className="p-5">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0">
+                              <div className="w-8 h-8 bg-green-500 rounded-md flex items-center justify-center">
+                                <span className="text-white text-sm font-medium">+</span>
+                              </div>
                             </div>
-                            <div className="flex items-center space-x-2">
-                              <p className={`text-sm font-medium ${transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                ${Math.abs(transaction.amount).toFixed(2)}
-                              </p>
+                            <div className="ml-5 w-0 flex-1">
+                              <dl>
+                                <dt className="text-sm font-medium text-gray-500 truncate">Total Assets</dt>
+                                <dd className="text-lg font-medium text-green-600">${totalAssets.toFixed(2)}</dd>
+                              </dl>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* Total Debt */}
+                      <button
+                        onClick={() => setCurrentView('accounts')}
+                        className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+                      >
+                        <div className="p-5">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0">
+                              <div className="w-8 h-8 bg-red-500 rounded-md flex items-center justify-center">
+                                <span className="text-white text-sm font-medium">−</span>
+                              </div>
+                            </div>
+                            <div className="ml-5 w-0 flex-1">
+                              <dl>
+                                <dt className="text-sm font-medium text-gray-500 truncate">Total Debt</dt>
+                                <dd className="text-lg font-medium text-red-600">${totalDebt.toFixed(2)}</dd>
+                              </dl>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* Total Balance */}
+                      <button
+                        onClick={() => setCurrentView('accounts')}
+                        className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+                      >
+                        <div className="p-5">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0">
+                              <div className="w-8 h-8 rounded-md flex items-center justify-center" style={{ backgroundColor: 'var(--color-primary-blue)' }}>
+                                <span className="text-white text-sm font-medium">$</span>
+                              </div>
+                            </div>
+                            <div className="ml-5 w-0 flex-1">
+                              <dl>
+                                <dt className="text-sm font-medium text-gray-500 truncate">Total Balance</dt>
+                                <dd className={`text-lg font-medium ${totalBalance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                                  ${totalBalance.toFixed(2)}
+                                </dd>
+                              </dl>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* Envelopes */}
+                      <button
+                        onClick={() => setCurrentView('envelopes')}
+                        className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+                      >
+                        <div className="p-5">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0">
+                              <div className="w-8 h-8 bg-purple-500 rounded-md flex items-center justify-center">
+                                <span className="text-white text-sm font-medium">E</span>
+                              </div>
+                            </div>
+                            <div className="ml-5 w-0 flex-1">
+                              <dl>
+                                <dt className="text-sm font-medium text-gray-500 truncate">Envelopes</dt>
+                                <dd className="text-lg font-medium text-gray-900">{envelopes.length}</dd>
+                              </dl>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* Transactions */}
+                      <button
+                        onClick={() => setCurrentView('transactions')}
+                        className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+                      >
+                        <div className="p-5">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0">
+                              <div className="w-8 h-8 bg-orange-500 rounded-md flex items-center justify-center">
+                                <span className="text-white text-sm font-medium">T</span>
+                              </div>
+                            </div>
+                            <div className="ml-5 w-0 flex-1">
+                              <dl>
+                                <dt className="text-sm font-medium text-gray-500 truncate">Transactions</dt>
+                                <dd className="text-lg font-medium text-gray-900">{transactions.length}</dd>
+                              </dl>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                            );
+                          })()}
+                        </div>
+                      );
+
+                    case 'charts':
+                      return (
+                        <div key={section.id} className="mb-12">
+                          <DashboardCharts
+                            accounts={accounts}
+                            envelopes={envelopes}
+                            transactions={transactions}
+                          />
+                        </div>
+                      );
+
+                    case 'budgetProgress':
+                      return (
+                        <div key={section.id} className="mb-12">
+                          {(() => {
+                            const now = new Date();
+                            const currentMonth = now.getMonth();
+                            const currentYear = now.getFullYear();
+                            const monthTransactions = transactions.filter(t => {
+                              const tDate = t.date instanceof Date ? t.date : new Date(t.date);
+                              return tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
+                            });
+                            const totalBudget = envelopes.reduce((sum, env) => sum + env.allocated, 0);
+                            const totalSpent = monthTransactions.filter(t => t.amount < 0).reduce((sum, t) => sum + Math.abs(t.amount), 0);
+                            const budgetProgress = totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0;
+
+                            return (
+                              <div className="bg-white shadow rounded-lg p-6">
+                                <h3 className="text-lg font-medium text-gray-900 mb-4">Budget Progress This Month</h3>
+                                <div className="space-y-4">
+                                  <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                      <span className="text-sm font-medium text-gray-700">Total Spending</span>
+                                      <span className="text-sm font-medium text-gray-900">${totalSpent.toFixed(2)} of ${totalBudget.toFixed(2)}</span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-3">
+                                      <div
+                                        className={`h-3 rounded-full transition-all ${
+                                          budgetProgress >= 100 ? 'bg-red-500' : budgetProgress >= 80 ? 'bg-yellow-500' : 'bg-green-500'
+                                        }`}
+                                        style={{ width: `${Math.min(budgetProgress, 100)}%` }}
+                                      />
+                                    </div>
+                                    <p className="text-sm text-gray-600 mt-2">{budgetProgress}% of monthly budget used</p>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      );
+
+                    case 'quickActions':
+                      return (
+                        <div key={section.id} className="mb-12">
+                          <div className="bg-white shadow rounded-lg p-6">
+                            <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
+                            <div className="grid grid-cols-2 gap-3">
                               <button
-                                onClick={() => setEditingTransaction(transaction)}
-                                className="text-indigo-600 hover:text-indigo-900 text-sm font-medium transition-colors"
-                                aria-label={`Edit transaction: ${transaction.description}`}
-                                title={`Edit transaction: ${transaction.description}`}
+                                onClick={() => setCurrentView('transactions')}
+                                className="p-4 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors text-center"
                               >
-                                Edit
+                                <div className="text-xl mb-1">➕</div>
+                                <span className="text-sm font-medium text-gray-900">Add Transaction</span>
                               </button>
                               <button
-                                onClick={() => {
-                                  if (confirm('Are you sure you want to delete this transaction?')) {
-                                    handleTransactionDelete(transaction.id);
-                                  }
-                                }}
-                                className="text-red-600 hover:text-red-900 text-sm font-medium transition-colors"
-                                aria-label={`Delete transaction: ${transaction.description}`}
-                                title={`Delete transaction: ${transaction.description}`}
+                                onClick={() => setCurrentView('envelopes')}
+                                className="p-4 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors text-center"
                               >
-                                Delete
+                                <div className="text-xl mb-1">📦</div>
+                                <span className="text-sm font-medium text-gray-900">Manage Envelopes</span>
+                              </button>
+                              <button
+                                onClick={() => setCurrentView('accounts')}
+                                className="p-4 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors text-center"
+                              >
+                                <div className="text-xl mb-1">🏦</div>
+                                <span className="text-sm font-medium text-gray-900">Accounts</span>
+                              </button>
+                              <button
+                                onClick={() => setShowGetPaidModal(true)}
+                                className="p-4 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors text-center"
+                              >
+                                <div className="text-xl mb-1">💰</div>
+                                <span className="text-sm font-medium text-gray-900">Record Income</span>
                               </button>
                             </div>
                           </div>
                         </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                      );
+
+                    case 'recentTransactions':
+                      return (
+                        <div key={section.id} className="mb-12">
+                          <div className="bg-white shadow overflow-hidden sm:rounded-md">
+                            <div className="px-4 py-5 sm:px-6">
+                              <h3 className="text-lg leading-6 font-medium text-gray-900">Recent Transactions</h3>
+                            </div>
+                            <ul className="divide-y divide-gray-200">
+                              {transactions.slice(-5).reverse().map((transaction) => (
+                                <li key={transaction.id}>
+                                  <div className="px-4 py-4 sm:px-6">
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center">
+                                        <p className="text-sm font-medium text-gray-900">{transaction.description}</p>
+                                        <p className="ml-2 text-sm text-gray-500">
+                                          {transaction.date instanceof Date ? transaction.date.toLocaleDateString() : new Date(transaction.date).toLocaleDateString()}
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center space-x-2">
+                                        <p className={`text-sm font-medium ${transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                          ${Math.abs(transaction.amount).toFixed(2)}
+                                        </p>
+                                        <button
+                                          onClick={() => setEditingTransaction(transaction)}
+                                          className="text-indigo-600 hover:text-indigo-900 text-sm font-medium transition-colors"
+                                          aria-label={`Edit transaction: ${transaction.description}`}
+                                          title={`Edit transaction: ${transaction.description}`}
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            if (confirm('Are you sure you want to delete this transaction?')) {
+                                              handleTransactionDelete(transaction.id);
+                                            }
+                                          }}
+                                          className="text-red-600 hover:text-red-900 text-sm font-medium transition-colors"
+                                          aria-label={`Delete transaction: ${transaction.description}`}
+                                          title={`Delete transaction: ${transaction.description}`}
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      );
+
+                    default:
+                      return null;
+                  }
+                })}
               </div>
             )}
             {currentView === 'accounts' && (

@@ -1,0 +1,13 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Cloud -->
+  <path d="M 70 60 Q 60 45 75 35 Q 80 30 85 35 Q 95 25 105 30 Q 115 20 125 35 Q 135 40 130 55 Q 140 60 135 75 L 75 75 Q 70 70 70 60 Z" fill="#A7D8F8" stroke="none"/>
+  
+  <!-- Dollar sign coin - teal/green -->
+  <circle cx="95" cy="85" r="35" fill="#28A745" stroke="none"/>
+  <circle cx="95" cy="85" r="30" fill="#20B741" stroke="none"/>
+  
+  <!-- Dollar sign - white -->
+  <g fill="white" stroke="none" font-weight="bold" font-size="48" font-family="Arial, sans-serif">
+    <text x="95" y="100" text-anchor="middle" dominant-baseline="central">$</text>
+  </g>
+</svg>

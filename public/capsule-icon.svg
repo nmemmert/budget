@@ -1,0 +1,14 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="256" height="256" fill="#1E73BE" rx="60"/>
+  
+  <!-- Cloud -->
+  <path d="M 100 80 Q 85 80 75 90 Q 70 100 70 115 Q 70 125 80 135 L 170 135 Q 185 135 195 125 Q 205 115 205 100 Q 205 80 185 70 Q 175 65 165 65 Q 155 50 135 50 Q 110 50 100 70 Z" fill="#A7D8F8" opacity="0.9"/>
+  
+  <!-- Money Pill/Tag -->
+  <ellipse cx="130" cy="140" rx="55" ry="65" fill="#28A745" opacity="0.85"/>
+  <ellipse cx="130" cy="140" rx="50" ry="60" fill="#E8F5E9"/>
+  
+  <!-- Dollar Sign -->
+  <text x="130" y="155" font-size="80" font-weight="bold" fill="#28A745" text-anchor="middle" font-family="Arial, sans-serif">$</text>
+</svg>

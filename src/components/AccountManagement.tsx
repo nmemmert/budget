@@ -29,6 +29,14 @@ const accountTypes = [
   { value: 'loan', label: 'Loan', icon: '📋' },
 ];
 
+const liabilityTypes: Account['type'][] = ['credit_card', 'mortgage', 'loan'];
+const normalizeBalanceByType = (type: Account['type'], balance: number): number => {
+  if (liabilityTypes.includes(type)) {
+    return -Math.abs(balance || 0);
+  }
+  return balance || 0;
+};
+
 const accountColors = [
   'bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500',
   'bg-red-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500'
@@ -63,11 +71,13 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
       return;
     }
 
+    const normalizedBalance = normalizeBalanceByType(formData.type as Account['type'], formData.balance || 0);
+
     const account: Account = {
       id: editingAccount?.id || `${formData.type}-${Date.now()}`,
       name: formData.name,
       type: formData.type as Account['type'],
-      balance: formData.balance || 0,
+      balance: normalizedBalance,
       institution: formData.institution,
       accountNumber: formData.accountNumber,
       color: formData.color || 'bg-blue-500',
@@ -124,7 +134,9 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
         </div>
         <div className="bg-white p-6 rounded-lg shadow-sm border">
           <h3 className="text-sm font-medium text-gray-500">Total Balance</h3>
-          <p className="text-2xl font-bold text-green-600">${totalBalance.toFixed(2)}</p>
+          <p className={`text-2xl font-bold ${totalBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            ${totalBalance.toFixed(2)}
+          </p>
         </div>
         <div className="bg-white p-6 rounded-lg shadow-sm border">
           <h3 className="text-sm font-medium text-gray-500">Active Accounts</h3>
@@ -167,7 +179,9 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
 
                 <div className="flex items-center space-x-4">
                   <div className="text-right">
-                    <p className="font-semibold text-gray-900">${account.balance.toFixed(2)}</p>
+                    <p className={`font-semibold ${account.balance < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                      ${account.balance.toFixed(2)}
+                    </p>
                     <p className={`text-sm ${account.isActive ? 'text-green-600' : 'text-gray-500'}`}>
                       {account.isActive ? 'Active' : 'Inactive'}
                     </p>

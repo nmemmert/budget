@@ -99,6 +99,14 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
     { value: 'loan', label: 'Loan', icon: '📋' },
   ];
 
+  const liabilityTypes: Account['type'][] = ['credit_card', 'mortgage', 'loan'];
+  const normalizeBalanceByType = (type: Account['type'], balance: number): number => {
+    if (liabilityTypes.includes(type)) {
+      return -Math.abs(balance || 0);
+    }
+    return balance || 0;
+  };
+
   const envelopeColors = [
     'bg-green-500', 'bg-blue-500', 'bg-purple-500', 'bg-orange-500',
     'bg-red-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500'
@@ -212,11 +220,13 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
       return;
     }
 
+    const normalizedBalance = normalizeBalanceByType(newAccount.type as Account['type'], newAccount.balance || 0);
+
     const account: Account = {
       id: `${newAccount.type}-${Date.now()}`,
       name: newAccount.name,
       type: newAccount.type as Account['type'],
-      balance,
+      balance: normalizedBalance,
       institution: newAccount.institution,
       accountNumber: newAccount.accountNumber,
       color: newAccount.color || 'bg-blue-500',
@@ -233,7 +243,12 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
   };
 
   const handleAddEnvelope = () => {
-    if (!newEnvelope.name || !newEnvelope.accountId || newEnvelope.allocated === undefined) return;
+    const allocation = newEnvelope.allocated ?? 0;
+
+    if (!newEnvelope.name || !newEnvelope.accountId || allocation <= 0) {
+      alert('Please enter a budget amount greater than $0');
+      return;
+    }
 
     // Validation: unique name
     if (envelopes.some(env => env.name.toLowerCase() === newEnvelope.name!.toLowerCase())) {
@@ -244,7 +259,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
     const envelope: Envelope = {
       id: `env-${Date.now()}`,
       name: newEnvelope.name,
-      allocated: newEnvelope.allocated,
+      allocated: allocation,
       spent: 0,
       color: newEnvelope.color || 'bg-green-500',
       accountId: newEnvelope.accountId,
@@ -622,11 +637,21 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
                 return;
               }
 
+              const standardDefaults: Record<string, number> = {
+                Rent: 1200,
+                Groceries: 500,
+                Utilities: 250,
+                Savings: 300,
+                Transport: 200,
+                Entertainment: 150,
+                Emergency: 200,
+              };
+
               const standardNames = ['Rent', 'Groceries', 'Utilities', 'Savings', 'Transport', 'Entertainment', 'Emergency'];
               const newStandardEnvelopes: Envelope[] = standardNames.map((name, idx) => ({
                 id: `env-standard-${Date.now()}-${idx}`,
                 name,
-                allocated: 0,
+                allocated: standardDefaults[name] ?? 100,
                 spent: 0,
                 color: envelopeColors[idx % envelopeColors.length],
                 accountId: targetAccountId,
@@ -714,13 +739,13 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
               >
                 Cancel
               </button>
-              <button
-                onClick={handleAddEnvelope}
-                disabled={!newEnvelope.name || !newEnvelope.accountId}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-              >
-                Add Envelope
-              </button>
+                <button
+                  onClick={handleAddEnvelope}
+                  disabled={!newEnvelope.name || !newEnvelope.accountId || !newEnvelope.allocated || newEnvelope.allocated <= 0}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Add Envelope
+                </button>
             </div>
           </div>
         </div>

@@ -16,6 +16,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Capsule by NeCloud",
   description: "A modern envelope budgeting application to help you manage your finances effectively",
+  icons: {
+    icon: "/capsule-icon.svg",
+  },
 };
 
 export default function RootLayout({
