@@ -104,6 +104,98 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
     'bg-red-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500'
   ];
 
+  const generateDemoData = () => {
+    const demoAccounts: Account[] = [
+      {
+        id: 'checking-demo',
+        name: 'Main Checking',
+        type: 'checking',
+        balance: 5000,
+        color: 'bg-blue-500',
+        isActive: true,
+        institution: 'Demo Bank',
+      },
+      {
+        id: 'savings-demo',
+        name: 'Emergency Fund',
+        type: 'savings',
+        balance: 10000,
+        color: 'bg-green-500',
+        isActive: true,
+        institution: 'Demo Bank',
+      },
+    ];
+
+    const demoEnvelopes: Envelope[] = [
+      {
+        id: 'env-groceries',
+        name: 'Groceries',
+        allocated: 500,
+        spent: 0,
+        color: 'bg-orange-500',
+        accountId: 'checking-demo',
+      },
+      {
+        id: 'env-dining',
+        name: 'Dining & Entertainment',
+        allocated: 300,
+        spent: 0,
+        color: 'bg-pink-500',
+        accountId: 'checking-demo',
+      },
+      {
+        id: 'env-utilities',
+        name: 'Utilities',
+        allocated: 200,
+        spent: 0,
+        color: 'bg-red-500',
+        accountId: 'checking-demo',
+      },
+      {
+        id: 'env-transportation',
+        name: 'Transportation',
+        allocated: 400,
+        spent: 0,
+        color: 'bg-purple-500',
+        accountId: 'checking-demo',
+      },
+      {
+        id: 'env-personal',
+        name: 'Personal Care',
+        allocated: 150,
+        spent: 0,
+        color: 'bg-indigo-500',
+        accountId: 'checking-demo',
+      },
+    ];
+
+    return { demoAccounts, demoEnvelopes };
+  };
+
+  const handleSkipWithDemo = async () => {
+    if (!userId) {
+      setErrorMessage('No user ID provided');
+      return;
+    }
+    setIsSaving(true);
+    setErrorMessage(null);
+    try {
+      const { demoAccounts, demoEnvelopes } = generateDemoData();
+      DataService.setUserId(userId);
+      await DataService.saveUserData({
+        accounts: demoAccounts,
+        envelopes: demoEnvelopes,
+        transactions: [],
+        setupCompleted: true,
+      });
+      onComplete(demoAccounts, demoEnvelopes);
+    } catch (error) {
+      console.error('Error creating demo data:', error);
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to create demo data');
+      setIsSaving(false);
+    }
+  };
+
   const handleAddAccount = () => {
     if (!newAccount.name || !newAccount.type) return;
 
@@ -206,7 +298,13 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
         transactions: [],
         setupCompleted: true,
       });
-      onComplete(accountsWithDefaults, envelopesWithAllocations);
+      
+      try {
+        onComplete(accountsWithDefaults, envelopesWithAllocations);
+      } catch (callbackError) {
+        console.error('Error in setup completion callback:', callbackError);
+        setErrorMessage('Setup completed but failed to update display. Please refresh.');
+      }
     } catch (error) {
       console.error('Error saving setup data:', error);
       setErrorMessage('Failed to save setup data. Please try again.');
@@ -219,7 +317,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
     <div className="text-center">
       <div className="mb-8">
         <div className="text-6xl mb-4">💰</div>
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome to Envelope Budgeting</h1>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome to Capsule</h1>
         <p className="text-gray-600 mb-4">Let&apos;s set up your budget to get started with secure, organized financial tracking.</p>
       </div>
 
@@ -231,10 +329,11 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
           Get Started
         </button>
         <button
-          onClick={onSkip}
-          className="w-full text-gray-600 hover:text-gray-800 py-2"
+          onClick={handleSkipWithDemo}
+          disabled={isSaving}
+          className="w-full text-gray-600 hover:text-gray-800 py-2 disabled:opacity-50"
         >
-          Skip Setup (Use Demo Data)
+          {isSaving ? 'Creating demo data...' : 'Skip Setup (Use Demo Data)'}
         </button>
       </div>
     </div>
@@ -289,7 +388,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
 
       {/* Existing Accounts */}
       <div className="mb-6">
-        <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Your Accounts</h3>
+        <h3 className="font-semibold text-gray-900  mb-3">Your Accounts</h3>
         {(accounts || []).length === 0 ? (
           <p className="text-gray-500 dark:text-gray-400 text-center py-8">No accounts added yet</p>
         ) : (
@@ -299,11 +398,11 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
                 <div className="flex items-center space-x-3">
                   <div className={`w-4 h-4 rounded-full ${account.color}`}></div>
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{account.name}</p>
+                    <p className="font-medium text-gray-900 ">{account.name}</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400">{account.type.replace('_', ' ').toUpperCase()}</p>
                   </div>
                 </div>
-                <p className="font-semibold text-gray-900 dark:text-white">${account.balance.toFixed(2)}</p>
+                <p className="font-semibold text-gray-900 ">${account.balance.toFixed(2)}</p>
               </div>
             ))}
           </div>
@@ -343,27 +442,27 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
       {/* Add Account Modal */}
       {showAddAccount && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Add Account</h3>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Add Account</h3>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Account Name</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
                 <input
                   type="text"
                   value={newAccount.name || ''}
                   onChange={(e) => setNewAccount(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                   placeholder="e.g., Main Checking"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Account Type</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Account Type</label>
                 <select
                   value={newAccount.type || 'checking'}
                   onChange={(e) => setNewAccount(prev => ({ ...prev, type: e.target.value as Account['type'] }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                 >
                   {accountTypes.map((type) => (
                     <option key={type.value} value={type.value}>
@@ -374,30 +473,30 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Current Balance</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Current Balance</label>
                 <input
                   type="number"
                   step="0.01"
                   value={newAccount.balance || ''}
                   onChange={(e) => setNewAccount(prev => ({ ...prev, balance: parseFloat(e.target.value) || 0 }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                   placeholder="0.00"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Institution (Optional)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Institution (Optional)</label>
                 <input
                   type="text"
                   value={newAccount.institution || ''}
                   onChange={(e) => setNewAccount(prev => ({ ...prev, institution: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                   placeholder="e.g., Bank of America"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Color</label>
+                <label className="block text-sm font-medium text-gray-700  mb-1">Color</label>
                 <div className="flex space-x-2">
                   {envelopeColors.slice(0, 6).map((color) => (
                     <button
@@ -440,7 +539,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
 
       {/* Existing Envelopes */}
       <div className="mb-6">
-        <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Your Envelopes</h3>
+        <h3 className="font-semibold text-gray-900  mb-3">Your Envelopes</h3>
         {envelopes.length === 0 ? (
           <p className="text-gray-500 dark:text-gray-400 text-center py-8">No envelopes created yet</p>
         ) : (
@@ -452,11 +551,11 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
                   <div className="flex items-center space-x-3">
                     <div className={`w-4 h-4 rounded-full ${envelope.color}`}></div>
                     <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{envelope.name}</p>
+                      <p className="font-medium text-gray-900 ">{envelope.name}</p>
                       <p className="text-sm text-gray-500 dark:text-gray-400">{account?.name}</p>
                     </div>
                   </div>
-                  <p className="font-semibold text-gray-900 dark:text-white">${envelope.allocated.toFixed(2)}</p>
+                  <p className="font-semibold text-gray-900 ">${envelope.allocated.toFixed(2)}</p>
                 </div>
               );
             })}
@@ -473,7 +572,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
             checked={includeStandardEnvelopes}
             onChange={(e) => setIncludeStandardEnvelopes(e.target.checked)}
           />
-          <span className="font-medium text-gray-900 dark:text-white">Add standard envelopes</span>
+          <span className="font-medium text-gray-900 ">Add standard envelopes</span>
         </label>
 
         <div className="mt-3">
@@ -551,27 +650,27 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
       {/* Add Envelope Modal */}
       {showAddEnvelope && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Add Envelope</h3>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Add Envelope</h3>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Envelope Name</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Envelope Name</label>
                 <input
                   type="text"
                   value={newEnvelope.name || ''}
                   onChange={(e) => setNewEnvelope(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                   placeholder="e.g., Groceries"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Account</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Account</label>
                 <select
                   value={newEnvelope.accountId || ''}
                   onChange={(e) => setNewEnvelope(prev => ({ ...prev, accountId: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                 >
                   <option value="">Select an account</option>
                   {accounts.map((account) => (
@@ -583,19 +682,19 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Monthly Budget</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Monthly Budget</label>
                 <input
                   type="number"
                   step="0.01"
                   value={newEnvelope.allocated || ''}
                   onChange={(e) => setNewEnvelope(prev => ({ ...prev, allocated: parseFloat(e.target.value) || 0 }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
                   placeholder="0.00"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Color</label>
+                <label className="block text-sm font-medium text-gray-700  mb-1">Color</label>
                 <div className="flex space-x-2">
                   {envelopeColors.map((color) => (
                     <button
@@ -638,8 +737,8 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
 
       {/* Income Allocation Settings */}
       <div className="mb-6">
-        <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Envelope Income Allocations</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+        <h3 className="font-semibold text-gray-900  mb-3">Envelope Income Allocations</h3>
+        <p className="text-sm text-gray-600  mb-4">
           Configure how much of your income goes to each envelope automatically when you get paid.
           You can set percentages or fixed amounts.
         </p>
@@ -666,7 +765,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Allocation Type</label>
+                    <label className="block text-sm font-medium text-gray-700  mb-1">Allocation Type</label>
                     <select
                       value={allocation?.type || 'percentage'}
                       onChange={(e) => setIncomeAllocations(prev => ({
@@ -676,7 +775,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
                           value: allocation?.value || 0
                         }
                       }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-400"
                     >
                       <option value="percentage">Percentage</option>
                       <option value="fixed">Fixed Amount</option>
@@ -684,7 +783,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-sm font-medium text-gray-700  mb-1">
                       {allocation?.type === 'fixed' ? 'Amount ($)' : 'Percentage (%)'}
                     </label>
                     <input
@@ -701,7 +800,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
                         }
                       }))}
                       placeholder={allocation?.type === 'fixed' ? '0.00' : '0'}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-400"
                     />
                   </div>
 
@@ -772,8 +871,8 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
 
       {/* Default Paycheck Amounts */}
       <div className="mb-6">
-        <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Default Paycheck Amounts</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+        <h3 className="font-semibold text-gray-900  mb-3">Default Paycheck Amounts</h3>
+        <p className="text-sm text-gray-600  mb-4">
           Set default amounts for each account to speed up paycheck entry. You can always change these later.
         </p>
 
@@ -795,7 +894,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
 
                 <div className="flex items-center space-x-4">
                   <div className="flex-1">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Default Paycheck Amount</label>
+                    <label className="block text-sm font-medium text-gray-700  mb-1">Default Paycheck Amount</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
                       <input
@@ -808,7 +907,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
                           [account.id]: parseFloat(e.target.value) || 0
                         }))}
                         placeholder="0.00"
-                        className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-400"
                       />
                     </div>
                   </div>
@@ -854,7 +953,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
       <div className="mb-8">
         <div className="text-6xl mb-4">🎉</div>
         <h2 className="text-2xl font-bold text-gray-900 mb-2">Setup Complete!</h2>
-        <p className="text-gray-600">Your envelope budgeting system is ready to use.</p>
+        <p className="text-gray-600">Your Capsule budget is ready to use.</p>
       </div>
 
       <div className="bg-gray-50 rounded-lg p-6 mb-8">
@@ -908,15 +1007,19 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={handleBackdropClick}>
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        {/* Close button */}
-        <button
-          onClick={onSkip}
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-          aria-label="Close setup wizard"
-        >
-          ✕
-        </button>
+      <div className="bg-white rounded-lg shadow-xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        {/* Close button - only on welcome step, or if closing from welcome, create demo data */}
+        {currentStep === 'welcome' && (
+          <button
+            onClick={handleSkipWithDemo}
+            disabled={isSaving}
+            className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
+            aria-label="Close setup wizard"
+            title="Close setup wizard and use demo data"
+          >
+            ✕
+          </button>
+        )}
 
         {/* Progress Indicator */}
         <div className="mb-8">
@@ -940,7 +1043,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
               </div>
             ))}
           </div>
-          <div className="text-center text-sm text-gray-600 dark:text-gray-400">
+          <div className="text-center text-sm text-gray-600">
             {currentStep === 'welcome' && 'Welcome'}
             {currentStep === 'data-source' && 'Choose Setup Method'}
             {currentStep === 'accounts' && 'Add Your Accounts'}

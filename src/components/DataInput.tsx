@@ -4,6 +4,19 @@ import { useState } from 'react';
 import FileUpload, { ParsedTransaction } from './FileUpload';
 import ManualEntry from './ManualEntry';
 
+interface Envelope {
+  id: string;
+  name: string;
+  allocated?: number;
+  spent?: number;
+}
+
+interface Transaction {
+  id: string;
+  envelopeId?: string;
+  amount: number;
+}
+
 interface DataInputProps {
   onTransactionsAdded: (transactions: Array<{
     id: string;
@@ -13,17 +26,18 @@ interface DataInputProps {
     date: Date;
     accountId: string;
   }>) => void;
-  envelopes: { id: string; name: string }[];
+  envelopes: Envelope[];
   accounts: { id: string; name: string }[];
+  transactions?: Transaction[];
 }
 
 type InputMode = 'file' | 'manual';
 
-export default function DataInput({ onTransactionsAdded, envelopes, accounts }: DataInputProps) {
+export default function DataInput({ onTransactionsAdded, envelopes, accounts, transactions = [] }: DataInputProps) {
   const [inputMode, setInputMode] = useState<InputMode>('manual');
 
   const handleFileTransactionsParsed = (parsedTransactions: ParsedTransaction[]) => {
-    const transactions = parsedTransactions.map((t) => ({
+    const txns = parsedTransactions.map((t) => ({
       id: crypto.randomUUID(),
       amount: t.amount,
       description: t.description,
@@ -32,7 +46,7 @@ export default function DataInput({ onTransactionsAdded, envelopes, accounts }: 
       accountId: accounts?.[0]?.id || 'default-account', // Default to first account
     }));
 
-    onTransactionsAdded(transactions);
+    onTransactionsAdded(txns);
   };
 
   const handleManualTransactionAdded = (transaction: {
@@ -86,6 +100,7 @@ export default function DataInput({ onTransactionsAdded, envelopes, accounts }: 
           onTransactionAdded={handleManualTransactionAdded}
           envelopes={envelopes}
           accounts={accounts}
+          transactions={transactions}
         />
       ) : (
         <FileUpload onTransactionsParsed={handleFileTransactionsParsed} accounts={accounts} />

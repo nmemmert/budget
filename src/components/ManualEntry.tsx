@@ -2,6 +2,19 @@
 
 import { useState, useEffect } from 'react';
 
+interface Envelope {
+  id: string;
+  name: string;
+  allocated?: number;
+  spent?: number;
+}
+
+interface Transaction {
+  id: string;
+  envelopeId?: string;
+  amount: number;
+}
+
 interface ManualEntryProps {
   onTransactionAdded: (transaction: {
     amount: number;
@@ -10,11 +23,12 @@ interface ManualEntryProps {
     envelopeId?: string;
     accountId: string;
   }) => void;
-  envelopes: { id: string; name: string }[];
+  envelopes: Envelope[];
   accounts: { id: string; name: string }[];
+  transactions?: Transaction[];
 }
 
-export default function ManualEntry({ onTransactionAdded, envelopes, accounts }: ManualEntryProps) {
+export default function ManualEntry({ onTransactionAdded, envelopes, accounts, transactions = [] }: ManualEntryProps) {
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -33,8 +47,36 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts }:
     e.preventDefault();
 
     const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || !description.trim()) {
-      alert('Please enter a valid amount and description');
+    const descriptionTrimmed = description.trim();
+
+    // Validation
+    if (isNaN(numAmount)) {
+      alert('Please enter a valid amount');
+      return;
+    }
+
+    if (numAmount <= 0) {
+      alert('Amount must be greater than 0');
+      return;
+    }
+
+    if (numAmount > 999999999) {
+      alert('Amount is too large (max: $999,999,999)');
+      return;
+    }
+
+    if (!descriptionTrimmed) {
+      alert('Please enter a description');
+      return;
+    }
+
+    if (descriptionTrimmed.length < 3) {
+      alert('Description must be at least 3 characters');
+      return;
+    }
+
+    if (descriptionTrimmed.length > 100) {
+      alert('Description cannot exceed 100 characters');
       return;
     }
 
@@ -42,7 +84,7 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts }:
 
     onTransactionAdded({
       amount: transactionAmount,
-      description: description.trim(),
+      description: descriptionTrimmed,
       date: new Date(date),
       envelopeId: selectedEnvelope || undefined,
       accountId: selectedAccount,
@@ -92,7 +134,7 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts }:
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0.00"
-                className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-400"
                 required
               />
             </div>
@@ -106,7 +148,7 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts }:
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
               required
             />
           </div>
@@ -121,7 +163,7 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts }:
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Enter transaction description"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-400"
             required
           />
         </div>
@@ -133,14 +175,23 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts }:
           <select
             value={selectedEnvelope}
             onChange={(e) => setSelectedEnvelope(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
           >
             <option value="">Select an envelope...</option>
-            {envelopes.map((envelope) => (
-              <option key={envelope.id} value={envelope.id}>
-                {envelope.name}
-              </option>
-            ))}
+            {envelopes.map((envelope) => {
+              // Calculate remaining balance
+              const incomeAllocated = transactions
+                .filter(t => t.envelopeId === envelope.id && t.amount > 0)
+                .reduce((sum, t) => sum + t.amount, 0);
+              const totalAllocated = (envelope.allocated || 0) + incomeAllocated;
+              const remaining = totalAllocated - (envelope.spent || 0);
+              
+              return (
+                <option key={envelope.id} value={envelope.id}>
+                  {envelope.name} — ${remaining.toFixed(2)} remaining
+                </option>
+              );
+            })}
           </select>
         </div>
 
@@ -151,7 +202,7 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts }:
           <select
             value={selectedAccount}
             onChange={(e) => setSelectedAccount(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
             required
           >
             <option value="">Select an account...</option>
@@ -163,24 +214,26 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts }:
           </select>
         </div>
 
-        <div className="flex items-center space-x-4">
-          <label className="flex items-center">
+        <div className="flex items-center space-x-4 p-3 bg-gray-50 rounded-md">
+          <label className="flex items-center cursor-pointer">
             <input
               type="radio"
               checked={isExpense}
               onChange={() => setIsExpense(true)}
               className="mr-2"
+              aria-label="Transaction type: Expense"
             />
-            <span className="text-sm text-gray-700">Expense</span>
+            <span className="text-sm font-medium text-red-600">💸 Expense (Negative)</span>
           </label>
-          <label className="flex items-center">
+          <label className="flex items-center cursor-pointer">
             <input
               type="radio"
               checked={!isExpense}
               onChange={() => setIsExpense(false)}
               className="mr-2"
+              aria-label="Transaction type: Income"
             />
-            <span className="text-sm text-gray-700">Income</span>
+            <span className="text-sm font-medium text-green-600">💰 Income (Positive)</span>
           </label>
         </div>
 

@@ -134,24 +134,24 @@ export default function TransactionEdit({ transaction, envelopes, accounts, onSa
             </select>
           </div>
 
-          <div className="flex items-center space-x-4">
-            <label className="flex items-center">
+          <div className="flex items-center space-x-4 p-3 bg-gray-50 rounded-md">
+            <label className="flex items-center cursor-pointer">
               <input
                 type="radio"
                 checked={isExpense}
                 onChange={() => setIsExpense(true)}
                 className="mr-2"
               />
-              <span className="text-sm text-gray-700">Expense</span>
+              <span className="text-sm font-medium text-red-600">💸 Expense (Negative)</span>
             </label>
-            <label className="flex items-center">
+            <label className="flex items-center cursor-pointer">
               <input
                 type="radio"
                 checked={!isExpense}
                 onChange={() => setIsExpense(false)}
                 className="mr-2"
               />
-              <span className="text-sm text-gray-700">Income</span>
+              <span className="text-sm font-medium text-green-600">💰 Income (Positive)</span>
             </label>
           </div>
 

@@ -26,6 +26,7 @@ interface Account {
   name: string;
   type: 'checking' | 'savings' | 'credit_card' | 'mortgage' | 'investment' | 'loan';
   balance: number;
+  startingBalance?: number;
   institution?: string;
   accountNumber?: string;
   color: string;

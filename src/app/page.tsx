@@ -11,6 +11,8 @@ import DataExport from '../components/DataExport';
 import AuthModal from '../components/AuthModal';
 import SetupWizard from '../components/SetupWizard';
 import AccountManagement from '../components/AccountManagement';
+import DashboardCharts from '../components/DashboardCharts';
+import Settings from '../components/Settings';
 import GetPaid from '../components/GetPaid';
 
 interface User {
@@ -23,6 +25,7 @@ interface Account {
   name: string;
   type: 'checking' | 'savings' | 'credit_card' | 'mortgage' | 'investment' | 'loan';
   balance: number;
+  startingBalance?: number;
   institution?: string;
   accountNumber?: string;
   color: string;
@@ -58,6 +61,7 @@ export default function BudgetDashboard() {
   const [loading, setLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSetupWizard, setShowSetupWizard] = useState(false);
+  const [showGetPaidModal, setShowGetPaidModal] = useState(false);
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [envelopes, setEnvelopes] = useState<Envelope[]>([]);
@@ -81,18 +85,26 @@ export default function BudgetDashboard() {
         try {
           const userData = await DataService.loadUserData();
           if (userData) {
-            setAccounts(userData.accounts || []);
-            setEnvelopes(userData.envelopes || []);
             // Convert date strings to Date objects
-            const transactionsWithDates = (userData.transactions || []).map(t => ({
-              ...t,
-              date: typeof t.date === 'string' ? new Date(t.date) : t.date
+            const transactionsWithDates = (userData.transactions || []).map((transaction) => ({
+              ...transaction,
+              date: typeof transaction.date === 'string' ? new Date(transaction.date) : transaction.date,
             }));
+
+            const accountsWithBaseline = (userData.accounts || []).map((account) => {
+              const accountTransactions = transactionsWithDates.filter((transaction) => transaction.accountId === account.id);
+              const transactionTotal = accountTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
+              const startingBalance = account.startingBalance ?? account.balance - transactionTotal;
+              return { ...account, startingBalance, balance: startingBalance + transactionTotal };
+            });
+
+            setAccounts(accountsWithBaseline);
+            setEnvelopes(userData.envelopes || []);
             setTransactions(transactionsWithDates);
             setSetupCompleted(userData.setupCompleted || false);
             
             // Show setup wizard if setup is not completed OR if there are no accounts
-            const shouldShowWizard = !(userData.setupCompleted || false) || (userData.accounts || []).length === 0;
+            const shouldShowWizard = !(userData.setupCompleted || false) || accountsWithBaseline.length === 0;
             setShowSetupWizard(shouldShowWizard);
           } else {
             // New user - show setup wizard
@@ -118,10 +130,10 @@ export default function BudgetDashboard() {
     return () => unsubscribe();
   }, []);
 
-  // Save data whenever data changes
+  // Save data whenever data changes (with debouncing to prevent race conditions)
   useEffect(() => {
     if (user && (((accounts || []).length > 0 || (envelopes || []).length > 0 || (transactions || []).length > 0 || setupCompleted))) {
-      const saveData = async () => {
+      const debounceTimer = setTimeout(async () => {
         try {
           // Recalculate envelope spent amounts before saving
           const updatedEnvelopes = calculateEnvelopeSpending(envelopes, transactions);
@@ -137,8 +149,9 @@ export default function BudgetDashboard() {
         } catch (error) {
           console.error('Error saving user data:', error);
         }
-      };
-      saveData();
+      }, 1000); // Debounce saves by 1 second
+      
+      return () => clearTimeout(debounceTimer);
     }
   }, [user, accounts, envelopes, transactions, setupCompleted]);
 
@@ -147,33 +160,30 @@ export default function BudgetDashboard() {
     return envelopes.map(envelope => {
       const envelopeTransactions = transactions.filter(t => t.envelopeId === envelope.id);
       const spent = envelopeTransactions.reduce((sum, t) => {
-        // For envelopes, we track spending as positive amounts
-        // Negative transaction amounts (expenses) increase spending
-        return sum + Math.abs(t.amount < 0 ? t.amount : 0);
+        // Track spending from negative amounts (expenses)
+        // Positive amounts are income allocations to the envelope
+        return sum + (t.amount < 0 ? Math.abs(t.amount) : 0);
       }, 0);
+      // Keep allocated as-is; income allocations are stored in transactions, not in allocated
       return { ...envelope, spent };
     });
   };
 
   // Calculate account balances from transactions
   const calculateAccountBalances = (accounts: Account[], transactions: Transaction[]): Account[] => {
-    // Group transactions by account
     const accountTransactionMap = new Map<string, Transaction[]>();
-    transactions.forEach(t => {
-      if (!accountTransactionMap.has(t.accountId)) {
-        accountTransactionMap.set(t.accountId, []);
+    transactions.forEach((transaction) => {
+      if (!accountTransactionMap.has(transaction.accountId)) {
+        accountTransactionMap.set(transaction.accountId, []);
       }
-      accountTransactionMap.get(t.accountId)!.push(t);
+      accountTransactionMap.get(transaction.accountId)!.push(transaction);
     });
 
-    return accounts.map(account => {
+    return accounts.map((account) => {
       const accountTransactions = accountTransactionMap.get(account.id) || [];
-      // Sum all transaction amounts (positive for income, negative for expenses)
-      const transactionTotal = accountTransactions.reduce((sum, t) => sum + t.amount, 0);
-      // Balance is initial balance plus transaction total
-      // Note: This assumes the current balance includes initial setup balance
-      // In a real app, you might want to track initial balance separately
-      return account;
+      const transactionTotal = accountTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
+      const baseBalance = account.startingBalance ?? account.balance ?? 0;
+      return { ...account, startingBalance: baseBalance, balance: baseBalance + transactionTotal };
     });
   };
 
@@ -181,18 +191,69 @@ export default function BudgetDashboard() {
     const allTransactions = [...newTransactions];
 
     // Process income transactions - automatically allocate to envelopes
+    // BUT: only if allocations weren't already created by GetPaid
     newTransactions.forEach(transaction => {
       if (transaction.amount > 0 && !transaction.envelopeId) {
-        // This is income - allocate to envelopes based on custom settings or proportionally
-        const accountEnvelopes = envelopes.filter(env => env.accountId === transaction.accountId);
-        const envelopesWithAllocation = accountEnvelopes.filter(env => env.incomeAllocation && env.incomeAllocationType);
+        // Check if this income already has corresponding allocations in newTransactions
+        const hasExistingAllocations = newTransactions.some(
+          t => t.accountId === transaction.accountId && 
+               t.envelopeId && 
+               t.description.includes('→')
+        );
 
-        if (envelopesWithAllocation.length > 0) {
-          // Validate allocations before processing
-          const validation = validateIncomeAllocation(envelopesWithAllocation, transaction.amount);
-          if (!validation.isValid) {
-            console.warn('Invalid income allocation detected, falling back to proportional');
-            // Fall back to proportional allocation if validation fails
+        // Only create auto-allocations if none exist
+        if (!hasExistingAllocations) {
+          // This is income - allocate to envelopes based on custom settings or proportionally
+          const accountEnvelopes = envelopes.filter(env => env.accountId === transaction.accountId);
+          const envelopesWithAllocation = accountEnvelopes.filter(env => env.incomeAllocation && env.incomeAllocationType);
+
+          if (envelopesWithAllocation.length > 0) {
+            // Validate allocations before processing
+            const validation = validateIncomeAllocation(envelopesWithAllocation, transaction.amount);
+            if (!validation.isValid) {
+              console.warn('Invalid income allocation detected, falling back to proportional');
+              // Fall back to proportional allocation if validation fails
+              const totalAllocated = accountEnvelopes.reduce((sum, env) => sum + env.allocated, 0);
+              if (accountEnvelopes.length > 0 && totalAllocated > 0) {
+                accountEnvelopes.forEach(envelope => {
+                  const proportion = envelope.allocated / totalAllocated;
+                  const allocatedAmount = transaction.amount * proportion;
+                  if (allocatedAmount > 0) {
+                    allTransactions.push({
+                      id: crypto.randomUUID(),
+                      envelopeId: envelope.id,
+                      amount: allocatedAmount,
+                      description: `Income allocation - ${envelope.name}`,
+                      date: transaction.date,
+                      accountId: transaction.accountId,
+                    });
+                  }
+                });
+              }
+            } else {
+              // Use custom allocation settings
+              envelopesWithAllocation.forEach(envelope => {
+                let allocatedAmount = 0;
+                if (envelope.incomeAllocationType === 'percentage') {
+                  allocatedAmount = transaction.amount * (envelope.incomeAllocation! / 100);
+                } else if (envelope.incomeAllocationType === 'fixed') {
+                  allocatedAmount = Math.min(envelope.incomeAllocation!, transaction.amount);
+                }
+
+                if (allocatedAmount > 0) {
+                  allTransactions.push({
+                    id: crypto.randomUUID(),
+                    envelopeId: envelope.id,
+                    amount: allocatedAmount,
+                    description: `Income allocation - ${envelope.name}`,
+                    date: transaction.date,
+                    accountId: transaction.accountId,
+                  });
+                }
+              });
+            }
+          } else {
+            // No specific envelope allocation found, fall back to proportional allocation
             const totalAllocated = accountEnvelopes.reduce((sum, env) => sum + env.allocated, 0);
             if (accountEnvelopes.length > 0 && totalAllocated > 0) {
               accountEnvelopes.forEach(envelope => {
@@ -210,53 +271,18 @@ export default function BudgetDashboard() {
                 }
               });
             }
-          } else {
-            // Use custom allocation settings
-            envelopesWithAllocation.forEach(envelope => {
-              let allocatedAmount = 0;
-              if (envelope.incomeAllocationType === 'percentage') {
-                allocatedAmount = transaction.amount * (envelope.incomeAllocation! / 100);
-              } else if (envelope.incomeAllocationType === 'fixed') {
-                allocatedAmount = Math.min(envelope.incomeAllocation!, transaction.amount);
-              }
-
-              if (allocatedAmount > 0) {
-                allTransactions.push({
-                  id: crypto.randomUUID(),
-                  envelopeId: envelope.id,
-                  amount: allocatedAmount,
-                  description: `Income allocation - ${envelope.name}`,
-                  date: transaction.date,
-                  accountId: transaction.accountId,
-                });
-              }
-            });
-          }
-        } else {
-          // No specific envelope allocation found, fall back to proportional allocation
-          const totalAllocated = accountEnvelopes.reduce((sum, env) => sum + env.allocated, 0);
-          if (accountEnvelopes.length > 0 && totalAllocated > 0) {
-            accountEnvelopes.forEach(envelope => {
-              const proportion = envelope.allocated / totalAllocated;
-              const allocatedAmount = transaction.amount * proportion;
-              if (allocatedAmount > 0) {
-                allTransactions.push({
-                  id: crypto.randomUUID(),
-                  envelopeId: envelope.id,
-                  amount: allocatedAmount,
-                  description: `Income allocation - ${envelope.name}`,
-                  date: transaction.date,
-                  accountId: transaction.accountId,
-                });
-              }
-            });
           }
         }
       }
     });
 
-    // Add all processed transactions at once
+    // Add all processed transactions at once and immediately recompute derived balances
     setTransactions(prevTransactions => [...prevTransactions, ...allTransactions]);
+    
+    // Recalculate envelopes and accounts with the new transactions
+    const updatedTransactions = [...transactions, ...allTransactions];
+    setEnvelopes(calculateEnvelopeSpending(envelopes, updatedTransactions));
+    setAccounts(calculateAccountBalances(accounts, updatedTransactions));
   };
 
   const validateIncomeAllocation = (envelopes: Envelope[], totalAmount: number) => {
@@ -280,9 +306,9 @@ export default function BudgetDashboard() {
       return { isValid: false, message: 'Conflicting allocation types (fixed and percentage) detected.' };
     }
 
-    // Validate fixed allocations
-    if (hasFixed && fixedTotal !== totalAmount) {
-      return { isValid: false, message: 'Fixed allocations do not sum up to the total amount.' };
+    // Validate fixed allocations - allow partial allocation (don't require exact match)
+    if (hasFixed && fixedTotal > totalAmount) {
+      return { isValid: false, message: 'Fixed allocations exceed the total amount.' };
     }
 
     // Validate percentage allocations
@@ -308,7 +334,11 @@ export default function BudgetDashboard() {
   };
 
   const handleSetupComplete = (accounts: Account[], envelopes: Envelope[]) => {
-    setAccounts(accounts);
+    const accountsWithBaseline = accounts.map((account) => {
+      const baseBalance = account.startingBalance ?? account.balance;
+      return { ...account, startingBalance: baseBalance, balance: baseBalance };
+    });
+    setAccounts(accountsWithBaseline);
     setEnvelopes(envelopes);
     setTransactions([]);
     setSetupCompleted(true);
@@ -316,11 +346,21 @@ export default function BudgetDashboard() {
   };
 
   const handleAccountUpdate = (updatedAccount: Account) => {
-    setAccounts(prevAccounts => prevAccounts.map(acc => acc.id === updatedAccount.id ? updatedAccount : acc));
+    setAccounts((prevAccounts) => {
+      const baseBalance = updatedAccount.startingBalance ?? updatedAccount.balance;
+      const nextAccounts = prevAccounts.map((account) =>
+        account.id === updatedAccount.id ? { ...updatedAccount, startingBalance: baseBalance } : account,
+      );
+      return calculateAccountBalances(nextAccounts, transactions);
+    });
   };
 
   const handleAccountAdd = (newAccount: Account) => {
-    setAccounts(prevAccounts => [...prevAccounts, newAccount]);
+    setAccounts((prevAccounts) => {
+      const baseBalance = newAccount.startingBalance ?? newAccount.balance;
+      const nextAccounts = [...prevAccounts, { ...newAccount, startingBalance: baseBalance }];
+      return calculateAccountBalances(nextAccounts, transactions);
+    });
   };
 
   const handleAccountDelete = (accountId: string) => {
@@ -332,11 +372,21 @@ export default function BudgetDashboard() {
   };
 
   const handleTransactionEdit = (updatedTransaction: Transaction) => {
-    setTransactions(prevTransactions => prevTransactions.map(tx => tx.id === updatedTransaction.id ? updatedTransaction : tx));
+    setTransactions(prevTransactions => {
+      const newTransactions = prevTransactions.map(tx => tx.id === updatedTransaction.id ? updatedTransaction : tx);
+      setEnvelopes(calculateEnvelopeSpending(envelopes, newTransactions));
+      setAccounts(calculateAccountBalances(accounts, newTransactions));
+      return newTransactions;
+    });
   };
 
   const handleTransactionDelete = (transactionId: string) => {
-    setTransactions(prevTransactions => prevTransactions.filter(tx => tx.id !== transactionId));
+    setTransactions(prevTransactions => {
+      const newTransactions = prevTransactions.filter(tx => tx.id !== transactionId);
+      setEnvelopes(calculateEnvelopeSpending(envelopes, newTransactions));
+      setAccounts(calculateAccountBalances(accounts, newTransactions));
+      return newTransactions;
+    });
   };
 
   const handleCreateEnvelope = (newEnvelope: Envelope) => {
@@ -352,6 +402,65 @@ export default function BudgetDashboard() {
     ));
   };
 
+  const renderLanding = () => (
+    <div className="px-4 py-12 sm:px-6 lg:px-8">
+      <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+        <div className="space-y-6">
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-50 text-blue-700">Capsule</span>
+          <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 leading-tight">
+            Take control of your money with smart envelopes
+          </h1>
+          <p className="text-lg text-gray-600 leading-relaxed">
+            Create envelopes, track spending, and auto-allocate income across accounts. Get set up in minutes with our guided wizard.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="inline-flex justify-center items-center px-5 py-3 rounded-lg bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 transition-colors"
+            >
+              Get Started
+            </button>
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="inline-flex justify-center items-center px-5 py-3 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:border-gray-400 hover:text-gray-900 transition-colors"
+            >
+              Sign In
+            </button>
+          </div>
+          <div className="flex items-center gap-4 text-sm text-gray-500">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 bg-green-500 rounded-full" aria-hidden="true"></span>
+              Auto-save & offline-ready data
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 bg-indigo-500 rounded-full" aria-hidden="true"></span>
+              Guided setup wizard
+            </div>
+          </div>
+        </div>
+        <div className="bg-white shadow-xl rounded-2xl p-6 border border-gray-100">
+          <div className="grid grid-cols-1 gap-4">
+            <div className="p-4 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200">
+              <p className="text-sm text-blue-800 font-medium">Total Balance</p>
+              <p className="text-3xl font-bold text-blue-900 mt-2">$0.00</p>
+              <p className="text-xs text-blue-700 mt-1">Link accounts to see your starting balance</p>
+            </div>
+            <div className="p-4 rounded-xl bg-gradient-to-br from-green-50 to-green-100 border border-green-200">
+              <p className="text-sm text-green-800 font-medium">Envelopes</p>
+              <p className="text-3xl font-bold text-green-900 mt-2">Organize spending</p>
+              <p className="text-xs text-green-700 mt-1">Create categories with color-coded envelopes</p>
+            </div>
+            <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-200">
+              <p className="text-sm text-indigo-800 font-medium">Income Auto-Allocation</p>
+              <p className="text-3xl font-bold text-indigo-900 mt-2">Smart distribution</p>
+              <p className="text-xs text-indigo-700 mt-1">Allocate paychecks by percentage or fixed amounts</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Navigation */}
@@ -360,7 +469,10 @@ export default function BudgetDashboard() {
           <div className="flex justify-between h-16">
             <div className="flex">
               <div className="flex-shrink-0 flex items-center">
-                <h1 className="text-xl font-bold text-gray-900">Envelope Budgeting</h1>
+                <div>
+                  <h1 className="text-xl font-bold text-gray-900">Capsule</h1>
+                  <p className="text-xs font-normal text-gray-500">by NeCloud</p>
+                </div>
               </div>
               <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
                 <button
@@ -405,7 +517,15 @@ export default function BudgetDashboard() {
                 </button>
               </div>
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center space-x-3">
+              {user && setupCompleted && (
+                <button
+                  onClick={() => setShowGetPaidModal(true)}
+                  className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  💰 Get Paid
+                </button>
+              )}
               {user ? (
                 <button
                   onClick={handleSignOut}
@@ -430,11 +550,15 @@ export default function BudgetDashboard() {
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         {loading ? (
           <div className="text-center">Loading...</div>
+        ) : !user ? (
+          renderLanding()
         ) : (
           <>
             {currentView === 'dashboard' && (
               <div className="px-4 py-6 sm:px-0">
                 <h2 className="text-2xl font-bold text-gray-900 mb-6">Dashboard</h2>
+                
+                {/* Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                   <div className="bg-white overflow-hidden shadow rounded-lg">
                     <div className="p-5">
@@ -448,7 +572,7 @@ export default function BudgetDashboard() {
                           <dl>
                             <dt className="text-sm font-medium text-gray-500 truncate">Total Balance</dt>
                             <dd className="text-lg font-medium text-gray-900">
-                              ${accounts.reduce((sum, acc) => sum + acc.balance, 0).toFixed(2)}
+                              ${(accounts || []).reduce((sum, acc) => sum + acc.balance, 0).toFixed(2)}
                             </dd>
                           </dl>
                         </div>
@@ -490,6 +614,15 @@ export default function BudgetDashboard() {
                     </div>
                   </div>
                 </div>
+
+                {/* Dashboard Charts */}
+                <DashboardCharts
+                  accounts={accounts}
+                  envelopes={envelopes}
+                  transactions={transactions}
+                />
+                
+                {/* Recent Transactions */}
                 <div className="bg-white shadow overflow-hidden sm:rounded-md">
                   <div className="px-4 py-5 sm:px-6">
                     <h3 className="text-lg leading-6 font-medium text-gray-900">Recent Transactions</h3>
@@ -511,7 +644,9 @@ export default function BudgetDashboard() {
                               </p>
                               <button
                                 onClick={() => setEditingTransaction(transaction)}
-                                className="text-indigo-600 hover:text-indigo-900 text-sm"
+                                className="text-indigo-600 hover:text-indigo-900 text-sm font-medium transition-colors"
+                                aria-label={`Edit transaction: ${transaction.description}`}
+                                title={`Edit transaction: ${transaction.description}`}
                               >
                                 Edit
                               </button>
@@ -521,7 +656,9 @@ export default function BudgetDashboard() {
                                     handleTransactionDelete(transaction.id);
                                   }
                                 }}
-                                className="text-red-600 hover:text-red-900 text-sm"
+                                className="text-red-600 hover:text-red-900 text-sm font-medium transition-colors"
+                                aria-label={`Delete transaction: ${transaction.description}`}
+                                title={`Delete transaction: ${transaction.description}`}
                               >
                                 Delete
                               </button>
@@ -547,7 +684,20 @@ export default function BudgetDashboard() {
             {currentView === 'transactions' && (
               <div className="px-4 py-6 sm:px-0">
                 <h2 className="text-2xl font-bold text-gray-900 mb-6">Transactions</h2>
+                
+                {/* Add Transactions Form */}
+                <DataInput
+                  onTransactionsAdded={handleTransactionsAdded}
+                  envelopes={envelopes}
+                  accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
+                  transactions={transactions}
+                />
+                
+                {/* All Transactions List */}
                 <div className="bg-white shadow overflow-hidden sm:rounded-md">
+                  <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
+                    <h3 className="text-lg leading-6 font-medium text-gray-900">All Transactions</h3>
+                  </div>
                   <ul className="divide-y divide-gray-200">
                     {transactions.map((transaction) => (
                       <li key={transaction.id}>
@@ -565,7 +715,9 @@ export default function BudgetDashboard() {
                               </p>
                               <button
                                 onClick={() => setEditingTransaction(transaction)}
-                                className="text-indigo-600 hover:text-indigo-900 text-sm"
+                                className="text-indigo-600 hover:text-indigo-900 text-sm font-medium transition-colors"
+                                aria-label={`Edit transaction: ${transaction.description}`}
+                                title={`Edit transaction: ${transaction.description}`}
                               >
                                 Edit
                               </button>
@@ -593,13 +745,15 @@ export default function BudgetDashboard() {
                 <h2 className="text-2xl font-bold text-gray-900 mb-6">Envelopes</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {envelopes.map((envelope) => (
-                    <div key={envelope.id} className="bg-white overflow-hidden shadow rounded-lg">
+                    <div key={envelope.id} className="bg-white overflow-hidden shadow rounded-lg" role="article" aria-label={`Envelope: ${envelope.name}`}>
                       <div className="p-5">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center">
                             <div
                               className="w-4 h-4 rounded-full mr-3"
                               style={{ backgroundColor: envelope.color }}
+                              role="img"
+                              aria-label={`Color indicator`}
                             ></div>
                             <h3 className="text-lg font-medium text-gray-900">{envelope.name}</h3>
                           </div>
@@ -611,18 +765,30 @@ export default function BudgetDashboard() {
                           </button>
                         </div>
                         <div className="mt-4">
-                          <div className="flex justify-between text-sm text-gray-600">
-                            <span>Allocated</span>
-                            <span>${envelope.allocated.toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between text-sm text-gray-600">
-                            <span>Spent</span>
-                            <span>${envelope.spent.toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between text-sm font-medium text-gray-900">
-                            <span>Remaining</span>
-                            <span>${(envelope.allocated - envelope.spent).toFixed(2)}</span>
-                          </div>
+                          {(() => {
+                            // Calculate income allocated to this envelope
+                            const incomeAllocated = transactions
+                              .filter(t => t.envelopeId === envelope.id && t.amount > 0)
+                              .reduce((sum, t) => sum + t.amount, 0);
+                            const totalAllocated = envelope.allocated + incomeAllocated;
+                            const remaining = totalAllocated - envelope.spent;
+                            return (
+                              <>
+                                <div className="flex justify-between text-sm text-gray-600">
+                                  <span>Allocated</span>
+                                  <span>${totalAllocated.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm text-gray-600">
+                                  <span>Spent</span>
+                                  <span>${envelope.spent.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm font-medium text-gray-900">
+                                  <span>Remaining</span>
+                                  <span>${remaining.toFixed(2)}</span>
+                                </div>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -638,14 +804,14 @@ export default function BudgetDashboard() {
                 </div>
               </div>
             )}
-            {currentView === 'settings' && (
-              <div className="px-4 py-6 sm:px-0">
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">Settings</h2>
-                <DataExport
-                  envelopes={envelopes}
-                  transactions={transactions}
-                />
-              </div>
+            {currentView === 'settings' && user && setupCompleted && (
+              <Settings
+                user={user}
+                onAccountDeleted={() => {
+                  setCurrentView('dashboard');
+                  setUser(null);
+                }}
+              />
             )}
           </>
         )}
@@ -654,6 +820,22 @@ export default function BudgetDashboard() {
       {/* Modals and Components */}
       {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} onAuthSuccess={handleAuthSuccess} />}
       {showSetupWizard && <SetupWizard onComplete={handleSetupComplete} onSkip={() => setShowSetupWizard(false)} userId={user?.userId || ''} />}
+      {showGetPaidModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div onClick={(e) => e.stopPropagation()} className="w-full">
+            <GetPaid
+              accounts={accounts}
+              envelopes={envelopes}
+              onIncomeAdded={(txns) => {
+                handleTransactionsAdded(txns);
+                setShowGetPaidModal(false);
+              }}
+              onAccountUpdate={handleAccountUpdate}
+              autoOpen={true}
+            />
+          </div>
+        </div>
+      )}
       {editingTransaction && (
         <TransactionEdit
           transaction={editingTransaction}
@@ -687,23 +869,6 @@ export default function BudgetDashboard() {
           onCancel={() => setEditingEnvelope(null)}
           accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
         />
-      )}
-
-      {/* Components visible after setup completion */}
-      {setupCompleted && (
-        <>
-          <DataInput
-            onTransactionsAdded={handleTransactionsAdded}
-            envelopes={envelopes.map(env => ({ id: env.id, name: env.name }))}
-            accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
-          />
-          <GetPaid
-            accounts={accounts}
-            envelopes={envelopes}
-            onIncomeAdded={handleTransactionsAdded}
-            onAccountUpdate={handleAccountUpdate}
-          />
-        </>
       )}
     </div>
   );

@@ -153,9 +153,9 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
         ) : (
           <div className="divide-y divide-gray-200">
             {(accounts || []).map((account) => (
-              <div key={account.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50">
+              <div key={account.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50" role="article" aria-label={`Account: ${account.name}`}>
                 <div className="flex items-center space-x-4">
-                  <div className={`w-4 h-4 rounded-full ${account.color}`}></div>
+                  <div className={`w-4 h-4 rounded-full ${account.color}`} role="img" aria-label={`Color indicator: ${account.color}`}></div>
                   <div>
                     <h4 className="font-medium text-gray-900">{account.name}</h4>
                     <p className="text-sm text-gray-500">
@@ -176,8 +176,9 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
                   <div className="flex space-x-2">
                     <button
                       onClick={() => handleEdit(account)}
-                      className="text-gray-400 hover:text-blue-600 p-1 rounded"
-                      title="Edit account"
+                      className="text-gray-400 hover:text-blue-600 p-1 rounded transition-colors"
+                      title={`Edit ${account.name}`}
+                      aria-label={`Edit account ${account.name}`}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -185,8 +186,9 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
                     </button>
                     <button
                       onClick={() => handleDelete(account.id)}
-                      className="text-gray-400 hover:text-red-600 p-1 rounded"
-                      title="Delete account"
+                      className="text-gray-400 hover:text-red-600 p-1 rounded transition-colors"
+                      title={`Delete ${account.name}`}
+                      aria-label={`Delete account ${account.name}`}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />

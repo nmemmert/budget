@@ -7,6 +7,7 @@ export interface User {
 
 export class AuthService {
   private static currentUser: User | null = null;
+  private static authCallbacks: Set<(user: User | null) => void> = new Set();
 
   static async signUp(email: string, password: string): Promise<User> {
     try {
@@ -30,6 +31,9 @@ export class AuthService {
       if (typeof window !== 'undefined') {
         localStorage.setItem('user', JSON.stringify(result.user));
       }
+
+      // Notify all listeners
+      this.notifyAuthChange(result.user);
 
       return result.user;
     } catch (error) {
@@ -65,6 +69,9 @@ export class AuthService {
         localStorage.setItem('user', JSON.stringify(result.user));
       }
 
+      // Notify all listeners
+      this.notifyAuthChange(result.user);
+
       return result.user;
     } catch (error) {
       // Only log non-authentication errors to avoid console spam
@@ -81,6 +88,9 @@ export class AuthService {
       localStorage.removeItem('user');
       localStorage.removeItem('userId');
     }
+    
+    // Notify all listeners
+    this.notifyAuthChange(null);
   }
 
   static getCurrentUser(): User | null {
@@ -102,6 +112,9 @@ export class AuthService {
   }
 
   static onAuthStateChanged(callback: (user: User | null) => void): () => void {
+    // Add callback to listeners
+    this.authCallbacks.add(callback);
+    
     // Initial call with current user
     const user = this.getCurrentUser();
     callback(user);
@@ -126,9 +139,24 @@ export class AuthService {
 
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', handleStorageChange);
-      return () => window.removeEventListener('storage', handleStorageChange);
+      return () => {
+        window.removeEventListener('storage', handleStorageChange);
+        this.authCallbacks.delete(callback);
+      };
     }
 
-    return () => {};
+    return () => {
+      this.authCallbacks.delete(callback);
+    };
+  }
+
+  private static notifyAuthChange(user: User | null): void {
+    this.authCallbacks.forEach(callback => {
+      try {
+        callback(user);
+      } catch (err) {
+        console.error('Error in auth callback:', err);
+      }
+    });
   }
 }

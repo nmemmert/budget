@@ -47,6 +47,16 @@ export default function EnvelopeEdit({ envelope, onEnvelopeUpdated, onEnvelopeDe
   const [incomeAllocationType, setIncomeAllocationType] = useState<'percentage' | 'fixed'>(envelope.incomeAllocationType || 'percentage');
   const [incomeAllocation, setIncomeAllocation] = useState(envelope.incomeAllocation?.toString() || '');
 
+  // Sync form fields when a different envelope is opened for editing
+  useEffect(() => {
+    setName(envelope.name);
+    setAllocated(envelope.allocated.toString());
+    setSelectedColor(envelope.color);
+    setSelectedAccount(envelope.accountId);
+    setIncomeAllocationType(envelope.incomeAllocationType || 'percentage');
+    setIncomeAllocation(envelope.incomeAllocation?.toString() || '');
+  }, [envelope]);
+
   const handleDelete = () => {
     if (confirm(`Are you sure you want to delete the envelope "${envelope.name}"? Transactions linked to this envelope will be unassigned.`)) {
       if (onEnvelopeDeleted) {

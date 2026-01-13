@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Envelope Budgeting App",
+  title: "Capsule by NeCloud",
   description: "A modern envelope budgeting application to help you manage your finances effectively",
 };
 
