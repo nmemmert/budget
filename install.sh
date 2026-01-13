@@ -113,11 +113,12 @@ if [ ! -f .env ]; then
         echo "   Please update ENCRYPTION_KEY in .env with a secure random value"
     fi
     
-    # Update .env with generated key
+    # Update .env with generated key (escape special chars for sed)
+    ESCAPED_KEY=$(echo "$ENCRYPTION_KEY" | sed 's/[&/\\]/\\&/g')
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s/change-this-to-a-secure-random-key/$ENCRYPTION_KEY/" .env
+        sed -i '' "s|change-this-to-a-secure-random-key|$ESCAPED_KEY|" .env
     else
-        sed -i "s/change-this-to-a-secure-random-key/$ENCRYPTION_KEY/" .env
+        sed -i "s|change-this-to-a-secure-random-key|$ESCAPED_KEY|" .env
     fi
     echo "✅ Generated secure encryption key"
 else
