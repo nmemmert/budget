@@ -1,4 +1,59 @@
-# Capsule Budget - ZimaOS Deployment Guide
+# Capsule Budget Deployment Guide
+
+## Rocky Linux + Cockpit + Podman (Recommended)
+
+This is the easiest path for Rocky Linux servers managed with Cockpit.
+
+### 1) Install prerequisites on Rocky Linux
+
+```bash
+sudo dnf install -y podman podman-compose cockpit cockpit-podman git
+sudo systemctl enable --now cockpit.socket
+```
+
+Optional firewall rules:
+
+```bash
+sudo firewall-cmd --add-service=cockpit --permanent
+sudo firewall-cmd --add-port=7654/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+### 2) Clone and configure Capsule
+
+```bash
+git clone https://github.com/nmemmert/budget.git capsule-budget
+cd capsule-budget
+cp .env.example .env
+```
+
+Generate and set encryption key:
+
+```bash
+openssl rand -base64 32
+# paste the value into .env as ENCRYPTION_KEY=...
+```
+
+### 3) Deploy with Podman Compose
+
+```bash
+podman-compose up -d --build
+```
+
+If your Podman version provides the compose subcommand, this also works:
+
+```bash
+podman compose up -d --build
+```
+
+### 4) Manage in Cockpit
+
+1. Open Cockpit at `https://your-server:9090`
+2. Go to **Podman Containers**
+3. Verify `capsule-budget` is running
+4. Use Logs/Start/Stop/Restart directly from Cockpit
+
+Access Capsule at: `http://your-server:7654`
 
 ## Installation Methods
 
@@ -39,7 +94,7 @@ curl -fsSL https://raw.githubusercontent.com/nmemmert/budget/master/install.sh |
    This will:
    - Generate a secure encryption key
    - Clear any test data
-   - Build the Docker image
+   - Build the container image
    - Start the container
 
 3. **Access Capsule:**
@@ -67,23 +122,23 @@ If you prefer manual setup:
 
 4. **Build and start:**
    ```bash
-   docker-compose up -d
+   podman-compose up -d
    ```
 
 ## Data Persistence
 
-**IMPORTANT: Your data is safely stored outside the Docker container**
+**IMPORTANT: Your data is safely stored outside the container**
 
 ### How It Works
 
-The Docker setup uses a **bind mount** to persist data:
+The compose setup uses a **bind mount** to persist data:
 
 ```yaml
 volumes:
-  - ./data:/app/data  # Host directory : Container directory
+   - ./data:/app/data:Z  # Host directory : Container directory
 ```
 
-- **Host Location**: `./data/` (on your ZimaOS filesystem)
+- **Host Location**: `./data/` (on your host filesystem)
 - **Container Location**: `/app/data/` (inside the container)
 - **What's Stored**: 
   - User credentials (hashed)
@@ -95,13 +150,13 @@ volumes:
 
 ✅ Container restarts  
 ✅ Container rebuilds  
-✅ Docker Compose down/up  
+✅ Podman Compose down/up  
 ✅ System reboots (with restart: unless-stopped)  
 
 ### Data is Lost If
 
 ❌ You delete the `./data` directory  
-❌ You run `docker-compose down -v` (removes volumes)
+❌ You run `podman-compose down -v` (removes volumes)
 
 ### Testing Persistence
 
@@ -134,16 +189,17 @@ tar -xzf capsule-backup-YYYYMMDD.tar.gz
 - Enable automatic snapshots for the Capsule directory
 - Or use ZimaOS built-in backup features
 
-### Data Location on ZimaOS
+### Data Location on Rocky Linux / Podman
 
 Depending on where you deploy:
 - **SMB/File Manager**: Check the upload location
 - **SSH Deployment**: Usually `/mnt/your-pool/apps/capsule/data`
-- **Docker Apps**: May be in `/var/lib/docker/volumes/`
+- **Rootful Podman**: Usually under `/var/lib/containers/storage/`
+- **Rootless Podman**: Usually under `~/.local/share/containers/storage/`
 
 To find exact location:
 ```bash
-docker inspect capsule-budget | grep -A 10 "Mounts"
+podman inspect capsule-budget | grep -A 10 "Mounts"
 ```
 
 ## ZimaOS Integration
@@ -183,20 +239,20 @@ cp -r data data-backup-$(date +%Y%m%d)
 
 ```bash
 # View logs
-docker-compose logs -f
+podman-compose logs -f
 
 # Stop Capsule
-docker-compose stop
+podman-compose stop
 
 # Restart Capsule
-docker-compose restart
+podman-compose restart
 
 # Stop and remove container
-docker-compose down
+podman-compose down
 
 # Rebuild after updates
-docker-compose build --no-cache
-docker-compose up -d
+podman-compose build --no-cache
+podman-compose up -d
 ```
 
 ## Updating Capsule
@@ -206,9 +262,9 @@ docker-compose up -d
 git pull
 
 # Rebuild and restart
-docker-compose down
-docker-compose build
-docker-compose up -d
+podman-compose down
+podman-compose build
+podman-compose up -d
 ```
 
 Your data in `./data/` will persist across updates.
@@ -225,10 +281,49 @@ Your data in `./data/` will persist across updates.
 ### Container won't start
 ```bash
 # Check logs
-docker-compose logs
+podman-compose logs
 
 # Verify .env file exists
 ls -la .env
+```
+
+### Error: Failed to transpile next.config.ts / Cannot find module 'typescript'
+
+Cause: production containers prune devDependencies, and `next.config.ts` requires TypeScript at runtime.
+
+Fix:
+```bash
+# Pull latest changes that include next.config.mjs
+git pull
+
+# Rebuild image without cache and restart
+podman-compose down
+podman-compose build --no-cache
+podman-compose up -d
+```
+
+### Error: EACCES permission denied on /app/data/locks
+
+Cause: bind mount permissions/labels are not writable for the Podman container context.
+
+Fix:
+```bash
+# Stop container
+podman-compose down
+
+# Ensure data dir exists and is writable
+mkdir -p data
+chmod 0777 data
+
+# Rebuild and restart (compose now uses :Z,U)
+podman-compose build --no-cache
+podman-compose up -d
+```
+
+If SELinux is enforcing and issues persist:
+```bash
+ls -ldZ data
+podman unshare chown -R 0:0 data
 ```
 
 ### Port already in use
@@ -248,4 +343,4 @@ chmod 755 data
 
 For issues or questions:
 - GitHub: https://github.com/nmemmert/budget
-- Check logs: `docker-compose logs -f`
+- Check logs: `podman-compose logs -f`

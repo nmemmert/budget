@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Capsule Budget - One-Line Installer for ZimaOS/Docker
+# Capsule Budget - One-Line Installer for ZimaOS/Podman/Docker
 # Usage: curl -fsSL https://raw.githubusercontent.com/nmemmert/budget/master/install.sh | bash
 
 set -e
@@ -16,25 +16,36 @@ echo "║                                                            ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Check for Docker
+# Check for container engine
 echo "🔍 Checking prerequisites..."
-if ! command -v docker &> /dev/null; then
-    echo "❌ Docker is not installed"
-    echo "Please install Docker first: https://docs.docker.com/get-docker/"
+if command -v podman &> /dev/null; then
+    CONTAINER_ENGINE="podman"
+    echo "✅ Podman found"
+elif command -v docker &> /dev/null; then
+    CONTAINER_ENGINE="docker"
+    echo "✅ Docker found"
+else
+    echo "❌ No supported container engine found"
+    echo "Install Podman (recommended on Rocky Linux) or Docker"
     exit 1
 fi
-echo "✅ Docker found"
 
-# Check for Docker Compose
-if command -v docker-compose &> /dev/null; then
-    DOCKER_COMPOSE="docker-compose"
-    echo "✅ Docker Compose found (standalone)"
-elif docker compose version &> /dev/null 2>&1; then
-    DOCKER_COMPOSE="docker compose"
-    echo "✅ Docker Compose found (plugin)"
+# Check for compose command (Podman first)
+if command -v podman-compose &> /dev/null; then
+    CONTAINER_COMPOSE="podman-compose"
+    echo "✅ podman-compose found"
+elif command -v podman &> /dev/null && podman compose version &> /dev/null 2>&1; then
+    CONTAINER_COMPOSE="podman compose"
+    echo "✅ podman compose found"
+elif command -v docker-compose &> /dev/null; then
+    CONTAINER_COMPOSE="docker-compose"
+    echo "✅ docker-compose found"
+elif command -v docker &> /dev/null && docker compose version &> /dev/null 2>&1; then
+    CONTAINER_COMPOSE="docker compose"
+    echo "✅ docker compose found"
 else
-    echo "❌ Docker Compose is not installed"
-    echo "Please install Docker Compose: https://docs.docker.com/compose/install/"
+    echo "❌ No supported compose command found"
+    echo "Install one of: podman-compose, podman compose, docker-compose, docker compose"
     exit 1
 fi
 
@@ -127,23 +138,24 @@ fi
 
 # Create data directory
 mkdir -p data
+chmod 0777 data || true
 echo "✅ Data directory created"
 
 # Build and start
 echo ""
-echo "🔨 Building Docker image..."
-$DOCKER_COMPOSE build
+echo "🔨 Building container image..."
+$CONTAINER_COMPOSE build
 
 echo ""
 echo "🚀 Starting Capsule Budget..."
-$DOCKER_COMPOSE up -d
+$CONTAINER_COMPOSE up -d
 
 # Wait for container
 echo "⏳ Waiting for container to start..."
 sleep 5
 
 # Verify container is running
-if $DOCKER_COMPOSE ps | grep -q "Up"; then
+if $CONTAINER_COMPOSE ps | grep -q "Up"; then
     echo ""
     echo "╔════════════════════════════════════════════════════════════╗"
     echo "║                                                            ║"
@@ -164,10 +176,10 @@ if $DOCKER_COMPOSE ps | grep -q "Up"; then
     echo "💾 Data storage: $(pwd)/data"
     echo ""
     echo "🔧 Useful commands (run from $(pwd)):"
-    echo "   $DOCKER_COMPOSE logs -f       # View logs"
-    echo "   $DOCKER_COMPOSE stop          # Stop Capsule"
-    echo "   $DOCKER_COMPOSE restart       # Restart Capsule"
-    echo "   $DOCKER_COMPOSE down          # Stop and remove"
+    echo "   $CONTAINER_COMPOSE logs -f       # View logs"
+    echo "   $CONTAINER_COMPOSE stop          # Stop Capsule"
+    echo "   $CONTAINER_COMPOSE restart       # Restart Capsule"
+    echo "   $CONTAINER_COMPOSE down          # Stop and remove"
     echo ""
     echo "📚 Documentation:"
     echo "   • README.md - Getting started guide"
@@ -180,7 +192,7 @@ else
     echo "❌ Container failed to start"
     echo ""
     echo "Troubleshooting:"
-    echo "1. Check logs: $DOCKER_COMPOSE logs"
+    echo "1. Check logs: $CONTAINER_COMPOSE logs"
     echo "2. Verify .env file has ENCRYPTION_KEY set"
     echo "3. Check if port 7654 is available"
     echo ""

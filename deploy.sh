@@ -7,18 +7,22 @@ set -e
 echo "🚀 Deploying Capsule to ZimaOS..."
 echo ""
 
-# Detect docker compose command
-if command -v docker-compose &> /dev/null; then
-    DOCKER_COMPOSE="docker-compose"
-elif docker compose version &> /dev/null 2>&1; then
-    DOCKER_COMPOSE="docker compose"
+# Detect container compose command (Podman first, then Docker)
+if command -v podman-compose &> /dev/null; then
+    CONTAINER_COMPOSE="podman-compose"
+elif command -v podman &> /dev/null && podman compose version &> /dev/null 2>&1; then
+    CONTAINER_COMPOSE="podman compose"
+elif command -v docker-compose &> /dev/null; then
+    CONTAINER_COMPOSE="docker-compose"
+elif command -v docker &> /dev/null && docker compose version &> /dev/null 2>&1; then
+    CONTAINER_COMPOSE="docker compose"
 else
-    echo "❌ Docker Compose not found"
-    echo "Please install Docker Compose: https://docs.docker.com/compose/install/"
+    echo "❌ No supported compose command found"
+    echo "Install one of: podman-compose, podman compose, docker-compose, docker compose"
     exit 1
 fi
 
-echo "✅ Using: $DOCKER_COMPOSE"
+echo "✅ Using: $CONTAINER_COMPOSE"
 echo ""
 
 # Check if .env file exists
@@ -59,17 +63,19 @@ fi
 
 # Clear test data
 echo "🧹 Clearing test data..."
+mkdir -p data
+chmod 0777 data || true
 rm -rf data/*
 echo "✅ Test data cleared"
 echo ""
 
 # Build and start containers
-echo "🔨 Building Docker image..."
-$DOCKER_COMPOSE build
+echo "🔨 Building container image..."
+$CONTAINER_COMPOSE build
 
 echo ""
 echo "🚀 Starting Capsule..."
-$DOCKER_COMPOSE up -d
+$CONTAINER_COMPOSE up -d
 
 echo ""
 echo "⏳ Waiting for container to start..."
@@ -78,7 +84,7 @@ sleep 5
 # Verify data directory is mounted
 echo ""
 echo "🔍 Verifying data persistence..."
-if $DOCKER_COMPOSE exec capsule ls -la /app/data >/dev/null 2>&1; then
+if $CONTAINER_COMPOSE exec capsule ls -la /app/data >/dev/null 2>&1; then
     echo "✅ Data directory is correctly mounted in container"
 else
     echo "⚠️  Warning: Could not verify data directory mount"
@@ -92,10 +98,10 @@ echo "   http://localhost:7654"
 echo "   http://$(hostname -I | awk '{print $1}'):7654"
 echo ""
 echo "🔧 Useful commands:"
-echo "   $DOCKER_COMPOSE logs -f       # View logs"
-echo "   $DOCKER_COMPOSE stop          # Stop container"
-echo "   $DOCKER_COMPOSE restart       # Restart container"
-echo "   $DOCKER_COMPOSE down          # Stop and remove container"
+echo "   $CONTAINER_COMPOSE logs -f       # View logs"
+echo "   $CONTAINER_COMPOSE stop          # Stop container"
+echo "   $CONTAINER_COMPOSE restart       # Restart container"
+echo "   $CONTAINER_COMPOSE down          # Stop and remove container"
 echo ""
 echo "💾 Your data is stored in: ./data/"
 echo "   - This directory persists across container restarts"

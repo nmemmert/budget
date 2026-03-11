@@ -8,7 +8,7 @@ services:
       - "7654:7654"
     volumes:
       # Persist user data outside container
-      - ./data:/app/data
+      - ./data:/app/data:Z,U
     environment:
       - NODE_ENV=production
       # Generate a secure key: openssl rand -base64 32

@@ -59,7 +59,7 @@ A modern, privacy-focused envelope budgeting application built with Next.js, Typ
 
 ## Getting Started
 
-### Docker Installation (Recommended for ZimaOS)
+### Container Installation (Recommended for Rocky Linux + Cockpit)
 
 **Option 1: Clone and Deploy** (works for private/public repos)
 
@@ -76,6 +76,19 @@ curl -fsSL https://raw.githubusercontent.com/nmemmert/budget/master/install.sh |
 ```
 
 **Access at:** `http://localhost:7654` or `http://your-device-ip:7654`
+
+### Rocky Linux + Cockpit + Podman
+
+```bash
+sudo dnf install -y podman podman-compose cockpit cockpit-podman git
+sudo systemctl enable --now cockpit.socket
+
+git clone https://github.com/nmemmert/budget.git capsule-budget
+cd capsule-budget
+./deploy.sh
+```
+
+Manage the container in Cockpit at `https://your-server:9090` under **Podman Containers**.
 
 ### Manual Installation (Development)
 
@@ -304,19 +317,19 @@ Date,Amount,Description,Category
 
 ## Deployment
 
-### ZimaOS Deployment (Recommended)
+### Self-Hosted Deployment (Recommended)
 
-Capsule is designed for self-hosted deployment on ZimaOS and similar platforms.
+Capsule is designed for self-hosted deployment on Rocky Linux, ZimaOS, and similar platforms.
 
 **Quick Deploy:**
 ```bash
 ./deploy.sh
 ```
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed ZimaOS deployment instructions.
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed Podman/Docker deployment instructions.
 
 **Features:**
-- Docker containerization for easy deployment
+- Podman/Docker containerization for easy deployment
 - Persistent data storage in `./data` directory
 - Health checks and auto-restart
 - Encrypted local storage (no cloud required)
