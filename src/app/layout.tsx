@@ -19,6 +19,12 @@ export const metadata: Metadata = {
   icons: {
     icon: "/capsule-icon.svg",
   },
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Capsule",
+  },
 };
 
 export default function RootLayout({

@@ -1,4 +1,4 @@
-// Local authentication service (no Firebase needed)
+'use client';
 
 export interface User {
   userId: string;
@@ -7,119 +7,80 @@ export interface User {
 
 export class AuthService {
   private static currentUser: User | null = null;
+  private static sessionToken: string | null = null;
   private static authCallbacks: Set<(user: User | null) => void> = new Set();
 
   static async signUp(email: string, password: string): Promise<User> {
-    try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
+    const response = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Registration failed');
-      }
-
-      const result = await response.json();
-      this.currentUser = result.user;
-      
-      // Store in localStorage for persistence
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('user', JSON.stringify(result.user));
-      }
-
-      // Notify all listeners
-      this.notifyAuthChange(result.user);
-
-      return result.user;
-    } catch (error) {
-      // Only log non-authentication errors to avoid console spam
-      if (!(error instanceof Error) || !error.message.includes('User already exists')) {
-        console.error('Sign up error:', error);
-      }
-      throw error;
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Registration failed');
     }
+
+    const result = await response.json();
+    this._persist(result.user, result.sessionToken);
+    this.notifyAuthChange(result.user);
+    return result.user;
   }
 
   static async signIn(email: string, password: string): Promise<User> {
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
 
-      if (!response.ok) {
-        const error = await response.json();
-        // Don't log authentication errors to console as they may contain sensitive info
-        throw new Error(error.error || 'Login failed');
-      }
-
-      const result = await response.json();
-      this.currentUser = result.user;
-
-      // Store in localStorage for persistence
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('user', JSON.stringify(result.user));
-      }
-
-      // Notify all listeners
-      this.notifyAuthChange(result.user);
-
-      return result.user;
-    } catch (error) {
-      // Only log non-authentication errors to avoid console spam
-      if (!(error instanceof Error) || !error.message.includes('Invalid credentials')) {
-        console.error('Sign in error:', error);
-      }
-      throw error;
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Login failed');
     }
+
+    const result = await response.json();
+    this._persist(result.user, result.sessionToken);
+    this.notifyAuthChange(result.user);
+    return result.user;
   }
 
   static async signOut(): Promise<void> {
-    this.currentUser = null;
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('user');
-      localStorage.removeItem('userId');
+    const token = this.getSessionToken();
+    if (token) {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'x-session-token': token },
+      }).catch(() => {});
     }
-    
-    // Notify all listeners
+    this._clear();
     this.notifyAuthChange(null);
   }
 
   static getCurrentUser(): User | null {
     if (this.currentUser) return this.currentUser;
-    
-    if (typeof window !== 'undefined') {
+    if (typeof window === 'undefined') return null;
+
+    try {
       const userJson = localStorage.getItem('user');
-      if (userJson) {
-        try {
-          this.currentUser = JSON.parse(userJson);
-          return this.currentUser;
-        } catch (e) {
-          console.error('Error parsing stored user:', e);
-        }
-      }
-    }
-    
-    return null;
+      if (userJson) this.currentUser = JSON.parse(userJson);
+    } catch {}
+
+    return this.currentUser;
+  }
+
+  static getSessionToken(): string | null {
+    if (this.sessionToken) return this.sessionToken;
+    if (typeof window === 'undefined') return null;
+    this.sessionToken = localStorage.getItem('sessionToken');
+    return this.sessionToken;
   }
 
   static onAuthStateChanged(callback: (user: User | null) => void): () => void {
-    // Add callback to listeners
     this.authCallbacks.add(callback);
-    
-    // Initial call with current user
-    const user = this.getCurrentUser();
-    callback(user);
+    callback(this.getCurrentUser());
 
-    // Set up listener for storage events (for multi-tab support)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'user') {
         if (e.newValue) {
@@ -127,9 +88,7 @@ export class AuthService {
             const user = JSON.parse(e.newValue);
             this.currentUser = user;
             callback(user);
-          } catch (err) {
-            callback(null);
-          }
+          } catch { callback(null); }
         } else {
           this.currentUser = null;
           callback(null);
@@ -145,18 +104,29 @@ export class AuthService {
       };
     }
 
-    return () => {
-      this.authCallbacks.delete(callback);
-    };
+    return () => { this.authCallbacks.delete(callback); };
+  }
+
+  private static _persist(user: User, token: string): void {
+    this.currentUser = user;
+    this.sessionToken = token;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('user', JSON.stringify(user));
+      localStorage.setItem('sessionToken', token);
+    }
+  }
+
+  private static _clear(): void {
+    this.currentUser = null;
+    this.sessionToken = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('user');
+      localStorage.removeItem('sessionToken');
+      localStorage.removeItem('userId');
+    }
   }
 
   private static notifyAuthChange(user: User | null): void {
-    this.authCallbacks.forEach(callback => {
-      try {
-        callback(user);
-      } catch (err) {
-        console.error('Error in auth callback:', err);
-      }
-    });
+    this.authCallbacks.forEach(cb => { try { cb(user); } catch {} });
   }
 }

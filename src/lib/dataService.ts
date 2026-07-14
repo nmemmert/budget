@@ -1,4 +1,4 @@
-// Local file-based data service (no Firebase needed)
+import { AuthService } from './authService';
 
 interface Envelope {
   id: string;
@@ -6,18 +6,18 @@ interface Envelope {
   allocated: number;
   spent: number;
   color: string;
-  accountId: string; // Link envelope to specific account
-  incomeAllocation?: number; // Percentage (0-100) or fixed amount if negative
-  incomeAllocationType?: 'percentage' | 'fixed'; // How to interpret incomeAllocation
+  accountId: string;
+  incomeAllocation?: number;
+  incomeAllocationType?: 'percentage' | 'fixed';
 }
 
 interface Transaction {
   id: string;
   envelopeId?: string;
-  accountId: string; // Link transaction to specific account
+  accountId: string;
   amount: number;
   description: string;
-  date: Date | string; // Support both Date objects and ISO strings
+  date: Date | string;
   category?: string;
 }
 
@@ -39,93 +39,51 @@ interface UserData {
   envelopes: Envelope[];
   transactions: Transaction[];
   setupCompleted: boolean;
+  goals?: any[];
+  transactionRules?: any[];
+}
+
+function getAuthHeaders(): HeadersInit {
+  const token = AuthService.getSessionToken();
+  if (!token) throw new Error('Not authenticated');
+  return { 'Content-Type': 'application/json', 'x-session-token': token };
 }
 
 export class DataService {
-  private static currentUserId: string | null = null;
-
-  static setUserId(userId: string | null) {
-    this.currentUserId = userId;
-    if (typeof window !== 'undefined') {
-      if (userId) {
-        localStorage.setItem('userId', userId);
-      } else {
-        localStorage.removeItem('userId');
-      }
-    }
-  }
-
-  static getUserId(): string | null {
-    if (this.currentUserId) return this.currentUserId;
-    if (typeof window !== 'undefined') {
-      this.currentUserId = localStorage.getItem('userId');
-    }
-    return this.currentUserId;
-  }
-
-  static clearUserId() {
-    this.setUserId(null);
-  }
+  // kept for legacy callers in page.tsx — no-op now that session handles identity
+  static setUserId(_userId: string | null) {}
+  static getUserId(): string | null { return AuthService.getCurrentUser()?.userId ?? null; }
+  static clearUserId() {}
 
   static async saveUserData(data: UserData): Promise<void> {
-    const userId = this.getUserId();
-    if (!userId) throw new Error('No user ID set');
-
-    try {
-      const response = await fetch('/api/data', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': userId,
-        },
-        body: JSON.stringify(data),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to save data');
-      }
-    } catch (error) {
-      console.error('Error saving user data:', error);
-      throw error;
+    const response = await fetch('/api/data', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to save data');
     }
   }
 
   static async loadUserData(): Promise<UserData | null> {
-    const userId = this.getUserId();
-    if (!userId) throw new Error('No user ID set');
-
-    try {
-      const response = await fetch('/api/data', {
-        method: 'GET',
-        headers: {
-          'x-user-id': userId,
-        },
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to load data');
-      }
-
-      const result = await response.json();
-      return result.data;
-    } catch (error) {
-      console.error('Error loading user data:', error);
-      throw error;
+    const response = await fetch('/api/data', {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to load data');
     }
+    const result = await response.json();
+    return result.data;
   }
 
   static async updateUserData(updates: Partial<UserData>): Promise<void> {
-    try {
-      const currentData = await this.loadUserData();
-      if (currentData) {
-        const updatedData = { ...currentData, ...updates };
-        await this.saveUserData(updatedData);
-      }
-    } catch (error) {
-      console.error('Error updating user data:', error);
-      throw error;
+    const currentData = await this.loadUserData();
+    if (currentData) {
+      await this.saveUserData({ ...currentData, ...updates });
     }
   }
 }

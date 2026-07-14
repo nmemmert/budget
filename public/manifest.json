@@ -1,0 +1,20 @@
+{
+  "name": "Capsule - Smart Envelope Budgeting",
+  "short_name": "Capsule",
+  "description": "Track spending with smart envelopes and auto-income allocation",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#1E73BE",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/images/capsule-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "productivity"],
+  "lang": "en"
+}

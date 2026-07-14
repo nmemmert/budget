@@ -6,22 +6,14 @@ export async function POST(request: NextRequest) {
     const { email, password } = await request.json();
 
     if (!email || !password) {
-      return NextResponse.json(
-        { error: 'Email and password are required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
 
-    const user = await FileStorageService.registerUser(email, password);
+    const result = await FileStorageService.registerUser(email, password);
 
-    return NextResponse.json({ 
-      success: true,
-      user 
-    });
+    return NextResponse.json({ success: true, user: { userId: result.userId, email: result.email }, sessionToken: result.sessionToken });
   } catch (error: any) {
-    return NextResponse.json(
-      { error: error.message || 'Registration failed' },
-      { status: 400 }
-    );
+    const status = error.message === 'User already exists' ? 409 : 400;
+    return NextResponse.json({ error: error.message || 'Registration failed' }, { status });
   }
 }

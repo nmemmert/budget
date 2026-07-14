@@ -1,24 +1,22 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AuthService } from '../lib/authService';
 import { DataService } from '../lib/dataService';
 import DataInput from '../components/DataInput';
 import TransactionEdit from '../components/TransactionEdit';
 import EnvelopeCreate from '../components/EnvelopeCreate';
 import EnvelopeEdit from '../components/EnvelopeEdit';
-import DataExport from '../components/DataExport';
 import AuthModal from '../components/AuthModal';
 import SetupWizard from '../components/SetupWizard';
 import AccountManagement from '../components/AccountManagement';
 import DashboardCharts from '../components/DashboardCharts';
 import Settings from '../components/Settings';
 import GetPaid from '../components/GetPaid';
+import GoalsManager from '../components/GoalsManager';
+import TransactionRulesManager from '../components/TransactionRulesManager';
 
-interface User {
-  userId: string;
-  email: string;
-}
+interface User { userId: string; email: string }
 
 interface Account {
   id: string;
@@ -40,8 +38,9 @@ interface Envelope {
   spent: number;
   color: string;
   accountId: string;
-  incomeAllocation?: number; // Percentage (0-100) or fixed amount if negative
-  incomeAllocationType?: 'percentage' | 'fixed'; // How to interpret incomeAllocation
+  incomeAllocation?: number;
+  incomeAllocationType?: 'percentage' | 'fixed';
+  rollover?: boolean;
 }
 
 interface Transaction {
@@ -51,17 +50,52 @@ interface Transaction {
   description: string;
   date: Date;
   accountId: string;
+  isRecurring?: boolean;
+  recurringFrequency?: 'weekly' | 'biweekly' | 'monthly' | 'yearly';
+  lastAppliedDate?: string;
 }
 
-type ViewMode = 'dashboard' | 'accounts' | 'transactions' | 'envelopes' | 'settings';
+export interface Goal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  accountId: string;
+  targetDate?: string;
+  color: string;
+}
+
+export interface TransactionRule {
+  id: string;
+  keyword: string;
+  envelopeId: string;
+  matchCase: boolean;
+}
+
+type ViewMode = 'dashboard' | 'accounts' | 'transactions' | 'envelopes' | 'goals' | 'rules' | 'settings';
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 const liabilityTypes: Array<Account['type']> = ['credit_card', 'mortgage', 'loan'];
-const normalizeBalanceByType = (type: Account['type'], balance: number): number => {
-  if (liabilityTypes.includes(type)) {
-    return -Math.abs(balance || 0);
+
+function normalizeBalanceByType(type: Account['type'], balance: number): number {
+  return liabilityTypes.includes(type) ? -Math.abs(balance || 0) : (balance || 0);
+}
+
+function applyRulesToTransaction(
+  tx: Transaction,
+  rules: TransactionRule[],
+  envelopes: Envelope[],
+): Transaction {
+  if (tx.envelopeId || tx.amount >= 0) return tx;
+  for (const rule of rules) {
+    const haystack = rule.matchCase ? tx.description : tx.description.toLowerCase();
+    const needle = rule.matchCase ? rule.keyword : rule.keyword.toLowerCase();
+    if (haystack.includes(needle) && envelopes.some(e => e.id === rule.envelopeId)) {
+      return { ...tx, envelopeId: rule.envelopeId };
+    }
   }
-  return balance || 0;
-};
+  return tx;
+}
 
 export default function BudgetDashboard() {
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
@@ -70,17 +104,29 @@ export default function BudgetDashboard() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSetupWizard, setShowSetupWizard] = useState(false);
   const [showGetPaidModal, setShowGetPaidModal] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [envelopes, setEnvelopes] = useState<Envelope[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [transactionRules, setTransactionRules] = useState<TransactionRule[]>([]);
   const [setupCompleted, setSetupCompleted] = useState(false);
 
-  // Dashboard section order and visibility
+  // Transaction filters
+  const [txSearch, setTxSearch] = useState('');
+  const [txDateFrom, setTxDateFrom] = useState('');
+  const [txDateTo, setTxDateTo] = useState('');
+  const [txAccountFilter, setTxAccountFilter] = useState('');
+  const [txEnvelopeFilter, setTxEnvelopeFilter] = useState('');
+
+  // Dashboard customization
   const [dashboardSections, setDashboardSections] = useState([
     { id: 'summaryCards', label: 'Summary Cards', visible: true },
     { id: 'charts', label: 'Analytics Charts', visible: true },
+    { id: 'insights', label: 'Spending Insights', visible: true },
     { id: 'budgetProgress', label: 'Budget Progress', visible: true },
+    { id: 'goals', label: 'Goals', visible: true },
     { id: 'quickActions', label: 'Quick Actions', visible: true },
     { id: 'recentTransactions', label: 'Recent Transactions', visible: true },
   ]);
@@ -91,347 +137,339 @@ export default function BudgetDashboard() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showCreateEnvelope, setShowCreateEnvelope] = useState(false);
   const [editingEnvelope, setEditingEnvelope] = useState<Envelope | null>(null);
+  const [showGoalsManager, setShowGoalsManager] = useState(false);
 
-  // Initialize auth listener
+  // ── Derived helpers ──────────────────────────────────────────────────────────
+
+  const calculateEnvelopeSpending = useCallback((envs: Envelope[], txns: Transaction[]): Envelope[] =>
+    envs.map(envelope => {
+      const spent = txns
+        .filter(t => t.envelopeId === envelope.id && t.amount < 0)
+        .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+      return { ...envelope, spent };
+    }), []);
+
+  const calculateAccountBalances = useCallback((accs: Account[], txns: Transaction[]): Account[] => {
+    const map = new Map<string, number>();
+    txns.forEach(t => map.set(t.accountId, (map.get(t.accountId) ?? 0) + t.amount));
+    return accs.map(acc => {
+      const base = normalizeBalanceByType(acc.type, acc.startingBalance ?? acc.balance ?? 0);
+      return { ...acc, startingBalance: base, balance: base + (map.get(acc.id) ?? 0) };
+    });
+  }, []);
+
+  // ── Auth & data load ─────────────────────────────────────────────────────────
+
   useEffect(() => {
-    const unsubscribe = AuthService.onAuthStateChanged(async (user) => {
-      setUser(user);
-      if (user) {
-        // Set user ID for DataService
-        DataService.setUserId(user.userId);
-        
-        // Load user data
+    const unsub = AuthService.onAuthStateChanged(async (u) => {
+      setUser(u);
+      if (u) {
+        DataService.setUserId(u.userId);
         try {
           const userData = await DataService.loadUserData();
           if (userData) {
-            // Convert date strings to Date objects
-            const transactionsWithDates = (userData.transactions || []).map((transaction) => ({
-              ...transaction,
-              date: typeof transaction.date === 'string' ? new Date(transaction.date) : transaction.date,
+            const txnsWithDates = (userData.transactions || []).map((t: any) => ({
+              ...t,
+              date: typeof t.date === 'string' ? new Date(t.date) : t.date,
             }));
-
-            const accountsWithBaseline = (userData.accounts || []).map((account) => {
-              const accountTransactions = transactionsWithDates.filter((transaction) => transaction.accountId === account.id);
-              const transactionTotal = accountTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
-              const inferredBase = account.startingBalance ?? account.balance - transactionTotal;
-              const startingBalance = normalizeBalanceByType(account.type, inferredBase);
-              return { ...account, startingBalance, balance: startingBalance + transactionTotal };
+            const accsWithBase = (userData.accounts || []).map((acc: any) => {
+              const txTotal = txnsWithDates
+                .filter((t: Transaction) => t.accountId === acc.id)
+                .reduce((s: number, t: Transaction) => s + t.amount, 0);
+              const base = normalizeBalanceByType(acc.type, acc.startingBalance ?? acc.balance - txTotal);
+              return { ...acc, startingBalance: base, balance: base + txTotal };
             });
-
-            setAccounts(accountsWithBaseline);
+            setAccounts(accsWithBase);
             setEnvelopes(userData.envelopes || []);
-            setTransactions(transactionsWithDates);
+            setTransactions(txnsWithDates);
+            setGoals(userData.goals || []);
+            setTransactionRules(userData.transactionRules || []);
             setSetupCompleted(userData.setupCompleted || false);
-            
-            // Show setup wizard if setup is not completed OR if there are no accounts
-            const shouldShowWizard = !(userData.setupCompleted || false) || accountsWithBaseline.length === 0;
-            setShowSetupWizard(shouldShowWizard);
+            setShowSetupWizard(!(userData.setupCompleted) || accsWithBase.length === 0);
+
+            // Auto-apply due recurring transactions
+            autoApplyRecurring(txnsWithDates);
           } else {
-            // New user - show setup wizard
             setShowSetupWizard(true);
           }
-        } catch (error) {
-          console.error('Error loading user data:', error);
-          // On error, assume new user and show setup wizard
+        } catch {
           setShowSetupWizard(true);
         }
       } else {
-        // Clear data when user logs out
         DataService.setUserId(null);
-        setAccounts([]);
-        setEnvelopes([]);
-        setTransactions([]);
-        setSetupCompleted(false);
-        setShowSetupWizard(false);
+        setAccounts([]); setEnvelopes([]); setTransactions([]);
+        setGoals([]); setTransactionRules([]);
+        setSetupCompleted(false); setShowSetupWizard(false);
       }
       setLoading(false);
     });
-
-    return () => unsubscribe();
+    return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Save data whenever data changes (with debouncing to prevent race conditions)
+  // ── Auto-save ────────────────────────────────────────────────────────────────
+
   useEffect(() => {
-    if (user && (((accounts || []).length > 0 || (envelopes || []).length > 0 || (transactions || []).length > 0 || setupCompleted))) {
-      const debounceTimer = setTimeout(async () => {
-        try {
-          // Recalculate envelope spent amounts before saving
-          const updatedEnvelopes = calculateEnvelopeSpending(envelopes, transactions);
-          // Recalculate account balances before saving
-          const updatedAccounts = calculateAccountBalances(accounts, transactions);
-          
-          await DataService.saveUserData({ 
-            accounts: updatedAccounts, 
-            envelopes: updatedEnvelopes, 
-            transactions, 
-            setupCompleted 
-          });
-        } catch (error) {
-          console.error('Error saving user data:', error);
-        }
-      }, 1000); // Debounce saves by 1 second
-      
-      return () => clearTimeout(debounceTimer);
-    }
-  }, [user, accounts, envelopes, transactions, setupCompleted]);
+    if (!user) return;
+    if (!accounts.length && !envelopes.length && !transactions.length && !setupCompleted) return;
 
-  // Calculate envelope spending from transactions
-  const calculateEnvelopeSpending = (envelopes: Envelope[], transactions: Transaction[]): Envelope[] => {
-    return envelopes.map(envelope => {
-      const envelopeTransactions = transactions.filter(t => t.envelopeId === envelope.id);
-      const spent = envelopeTransactions.reduce((sum, t) => {
-        // Track spending from negative amounts (expenses)
-        // Positive amounts are income allocations to the envelope
-        return sum + (t.amount < 0 ? Math.abs(t.amount) : 0);
-      }, 0);
-      // Keep allocated as-is; income allocations are stored in transactions, not in allocated
-      return { ...envelope, spent };
-    });
-  };
-
-  // Calculate account balances from transactions
-  const calculateAccountBalances = (accounts: Account[], transactions: Transaction[]): Account[] => {
-    const accountTransactionMap = new Map<string, Transaction[]>();
-    transactions.forEach((transaction) => {
-      if (!accountTransactionMap.has(transaction.accountId)) {
-        accountTransactionMap.set(transaction.accountId, []);
+    setSaveStatus('saving');
+    const timer = setTimeout(async () => {
+      try {
+        const updatedEnvelopes = calculateEnvelopeSpending(envelopes, transactions);
+        const updatedAccounts = calculateAccountBalances(accounts, transactions);
+        await DataService.saveUserData({
+          accounts: updatedAccounts,
+          envelopes: updatedEnvelopes,
+          transactions,
+          goals,
+          transactionRules,
+          setupCompleted,
+        } as any);
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      } catch {
+        setSaveStatus('error');
       }
-      accountTransactionMap.get(transaction.accountId)!.push(transaction);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [user, accounts, envelopes, transactions, goals, transactionRules, setupCompleted,
+      calculateEnvelopeSpending, calculateAccountBalances]);
+
+  // ── Recurring transactions ───────────────────────────────────────────────────
+
+  const autoApplyRecurring = (txns: Transaction[]) => {
+    const now = new Date();
+    const due = txns.filter(t => {
+      if (!t.isRecurring || !t.recurringFrequency) return false;
+      const last = t.lastAppliedDate ? new Date(t.lastAppliedDate) : t.date;
+      const next = new Date(last);
+      if (t.recurringFrequency === 'weekly') next.setDate(next.getDate() + 7);
+      else if (t.recurringFrequency === 'biweekly') next.setDate(next.getDate() + 14);
+      else if (t.recurringFrequency === 'monthly') next.setMonth(next.getMonth() + 1);
+      else if (t.recurringFrequency === 'yearly') next.setFullYear(next.getFullYear() + 1);
+      return next <= now;
     });
 
-    return accounts.map((account) => {
-      const accountTransactions = accountTransactionMap.get(account.id) || [];
-      const transactionTotal = accountTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
-      const baseBalance = normalizeBalanceByType(account.type, account.startingBalance ?? account.balance ?? 0);
-      return { ...account, startingBalance: baseBalance, balance: baseBalance + transactionTotal };
+    if (due.length === 0) return;
+
+    const newTxns: Transaction[] = due.map(t => ({
+      ...t,
+      id: crypto.randomUUID(),
+      date: new Date(),
+      lastAppliedDate: new Date().toISOString(),
+    }));
+
+    setTransactions(prev => {
+      const updated = prev.map(t => due.find(d => d.id === t.id)
+        ? { ...t, lastAppliedDate: new Date().toISOString() }
+        : t);
+      return [...updated, ...newTxns];
     });
   };
 
-  const handleTransactionsAdded = (newTransactions: Transaction[]) => {
-    const allTransactions = [...newTransactions];
+  // ── Event handlers ───────────────────────────────────────────────────────────
 
-    // Process income transactions - automatically allocate to envelopes
-    // BUT: only if allocations weren't already created by GetPaid
-    newTransactions.forEach(transaction => {
-      if (transaction.amount > 0 && !transaction.envelopeId) {
-        // Check if this income already has corresponding allocations in newTransactions
-        const hasExistingAllocations = newTransactions.some(
-          t => t.accountId === transaction.accountId && 
-               t.envelopeId && 
-               t.description.includes('→')
-        );
+  const handleTransactionsAdded = (newTxns: Transaction[]) => {
+    // Apply auto-categorization rules
+    const ruled = newTxns.map(t => applyRulesToTransaction(t, transactionRules, envelopes));
+    const all = [...ruled];
 
-        // Only create auto-allocations if none exist
-        if (!hasExistingAllocations) {
-          // This is income - allocate to envelopes based on custom settings or proportionally
-          const accountEnvelopes = envelopes.filter(env => env.accountId === transaction.accountId);
-          const envelopesWithAllocation = accountEnvelopes.filter(env => env.incomeAllocation && env.incomeAllocationType);
+    ruled.forEach(tx => {
+      if (tx.amount > 0 && !tx.envelopeId) {
+        const accEnvs = envelopes.filter(e => e.accountId === tx.accountId);
+        const withAlloc = accEnvs.filter(e => e.incomeAllocation && e.incomeAllocationType);
+        const hasFixed = withAlloc.some(e => e.incomeAllocationType === 'fixed');
+        const hasPerc = withAlloc.some(e => e.incomeAllocationType === 'percentage');
+        const source = withAlloc.length > 0 && !(hasFixed && hasPerc) ? withAlloc : [];
 
-          if (envelopesWithAllocation.length > 0) {
-            // Validate allocations before processing
-            const validation = validateIncomeAllocation(envelopesWithAllocation, transaction.amount);
-            if (!validation.isValid) {
-              console.warn('Invalid income allocation detected, falling back to proportional');
-              // Fall back to proportional allocation if validation fails
-              const totalAllocated = accountEnvelopes.reduce((sum, env) => sum + env.allocated, 0);
-              if (accountEnvelopes.length > 0 && totalAllocated > 0) {
-                accountEnvelopes.forEach(envelope => {
-                  const proportion = envelope.allocated / totalAllocated;
-                  const allocatedAmount = transaction.amount * proportion;
-                  if (allocatedAmount > 0) {
-                    allTransactions.push({
-                      id: crypto.randomUUID(),
-                      envelopeId: envelope.id,
-                      amount: allocatedAmount,
-                      description: `Income allocation - ${envelope.name}`,
-                      date: transaction.date,
-                      accountId: transaction.accountId,
-                    });
-                  }
-                });
-              }
-            } else {
-              // Use custom allocation settings
-              envelopesWithAllocation.forEach(envelope => {
-                let allocatedAmount = 0;
-                if (envelope.incomeAllocationType === 'percentage') {
-                  allocatedAmount = transaction.amount * (envelope.incomeAllocation! / 100);
-                } else if (envelope.incomeAllocationType === 'fixed') {
-                  allocatedAmount = Math.min(envelope.incomeAllocation!, transaction.amount);
-                }
-
-                if (allocatedAmount > 0) {
-                  allTransactions.push({
-                    id: crypto.randomUUID(),
-                    envelopeId: envelope.id,
-                    amount: allocatedAmount,
-                    description: `Income allocation - ${envelope.name}`,
-                    date: transaction.date,
-                    accountId: transaction.accountId,
-                  });
-                }
+        if (source.length > 0) {
+          source.forEach(env => {
+            const amt = env.incomeAllocationType === 'percentage'
+              ? tx.amount * (env.incomeAllocation! / 100)
+              : Math.min(env.incomeAllocation!, tx.amount);
+            if (amt > 0) all.push({
+              id: crypto.randomUUID(), envelopeId: env.id, amount: amt,
+              description: `Income → ${env.name}`, date: tx.date, accountId: tx.accountId,
+            });
+          });
+        } else {
+          const totalAlloc = accEnvs.reduce((s, e) => s + e.allocated, 0);
+          if (accEnvs.length > 0 && totalAlloc > 0) {
+            accEnvs.forEach(env => {
+              const amt = tx.amount * (env.allocated / totalAlloc);
+              if (amt > 0) all.push({
+                id: crypto.randomUUID(), envelopeId: env.id, amount: amt,
+                description: `Income → ${env.name}`, date: tx.date, accountId: tx.accountId,
               });
-            }
-          } else {
-            // No specific envelope allocation found, fall back to proportional allocation
-            const totalAllocated = accountEnvelopes.reduce((sum, env) => sum + env.allocated, 0);
-            if (accountEnvelopes.length > 0 && totalAllocated > 0) {
-              accountEnvelopes.forEach(envelope => {
-                const proportion = envelope.allocated / totalAllocated;
-                const allocatedAmount = transaction.amount * proportion;
-                if (allocatedAmount > 0) {
-                  allTransactions.push({
-                    id: crypto.randomUUID(),
-                    envelopeId: envelope.id,
-                    amount: allocatedAmount,
-                    description: `Income allocation - ${envelope.name}`,
-                    date: transaction.date,
-                    accountId: transaction.accountId,
-                  });
-                }
-              });
-            }
+            });
           }
         }
       }
     });
 
-    // Add all processed transactions at once and immediately recompute derived balances
-    setTransactions(prevTransactions => [...prevTransactions, ...allTransactions]);
-    
-    // Recalculate envelopes and accounts with the new transactions
-    const updatedTransactions = [...transactions, ...allTransactions];
-    setEnvelopes(calculateEnvelopeSpending(envelopes, updatedTransactions));
-    setAccounts(calculateAccountBalances(accounts, updatedTransactions));
-  };
-
-  const validateIncomeAllocation = (envelopes: Envelope[], totalAmount: number) => {
-    let fixedTotal = 0;
-    let percentageTotal = 0;
-    let hasFixed = false;
-    let hasPercentage = false;
-
-    envelopes.forEach(envelope => {
-      if (envelope.incomeAllocationType === 'fixed') {
-        fixedTotal += envelope.incomeAllocation!;
-        hasFixed = true;
-      } else if (envelope.incomeAllocationType === 'percentage') {
-        percentageTotal += envelope.incomeAllocation!;
-        hasPercentage = true;
-      }
+    setTransactions(prev => {
+      const next = [...prev, ...all];
+      setEnvelopes(calculateEnvelopeSpending(envelopes, next));
+      setAccounts(calculateAccountBalances(accounts, next));
+      return next;
     });
-
-    // Check for conflicting allocation types
-    if (hasFixed && hasPercentage) {
-      return { isValid: false, message: 'Conflicting allocation types (fixed and percentage) detected.' };
-    }
-
-    // Validate fixed allocations - allow partial allocation (don't require exact match)
-    if (hasFixed && fixedTotal > totalAmount) {
-      return { isValid: false, message: 'Fixed allocations exceed the total amount.' };
-    }
-
-    // Validate percentage allocations
-    if (hasPercentage && (percentageTotal < 0 || percentageTotal > 100)) {
-      return { isValid: false, message: 'Percentage allocations must be between 0 and 100.' };
-    }
-
-    return { isValid: true };
   };
 
   const handleSignOut = async () => {
     setLoading(true);
-    try {
-      await AuthService.signOut();
-    } catch (error) {
-      console.error('Error signing out:', error);
-    }
+    await AuthService.signOut().catch(() => {});
     setLoading(false);
   };
 
-  const handleAuthSuccess = () => {
-    setShowAuthModal(false);
-  };
-
-  const handleSetupComplete = (accounts: Account[], envelopes: Envelope[]) => {
-    const accountsWithBaseline = accounts.map((account) => {
-      const baseBalance = normalizeBalanceByType(account.type, account.startingBalance ?? account.balance);
-      return { ...account, startingBalance: baseBalance, balance: baseBalance };
+  const handleSetupComplete = (accs: Account[], envs: Envelope[]) => {
+    const accsWithBase = accs.map(a => {
+      const base = normalizeBalanceByType(a.type, a.startingBalance ?? a.balance);
+      return { ...a, startingBalance: base, balance: base };
     });
-    setAccounts(accountsWithBaseline);
-    setEnvelopes(envelopes);
+    setAccounts(accsWithBase);
+    setEnvelopes(envs);
     setTransactions([]);
     setSetupCompleted(true);
     setShowSetupWizard(false);
   };
 
-  const handleAccountUpdate = (updatedAccount: Account) => {
-    setAccounts((prevAccounts) => {
-      const baseBalance = normalizeBalanceByType(updatedAccount.type, updatedAccount.startingBalance ?? updatedAccount.balance);
-      const nextAccounts = prevAccounts.map((account) =>
-        account.id === updatedAccount.id ? { ...updatedAccount, startingBalance: baseBalance } : account,
-      );
-      return calculateAccountBalances(nextAccounts, transactions);
+  const handleAccountUpdate = (updated: Account) => {
+    setAccounts(prev => {
+      const base = normalizeBalanceByType(updated.type, updated.startingBalance ?? updated.balance);
+      const next = prev.map(a => a.id === updated.id ? { ...updated, startingBalance: base } : a);
+      return calculateAccountBalances(next, transactions);
     });
   };
 
-  const handleAccountAdd = (newAccount: Account) => {
-    setAccounts((prevAccounts) => {
-      const baseBalance = normalizeBalanceByType(newAccount.type, newAccount.startingBalance ?? newAccount.balance);
-      const nextAccounts = [...prevAccounts, { ...newAccount, startingBalance: baseBalance }];
-      return calculateAccountBalances(nextAccounts, transactions);
+  const handleAccountAdd = (newAcc: Account) => {
+    setAccounts(prev => {
+      const base = normalizeBalanceByType(newAcc.type, newAcc.startingBalance ?? newAcc.balance);
+      return calculateAccountBalances([...prev, { ...newAcc, startingBalance: base }], transactions);
     });
   };
 
-  const handleAccountDelete = (accountId: string) => {
-    setAccounts(prevAccounts => prevAccounts.filter(acc => acc.id !== accountId));
-  };
-
-  const handleEnvelopeUpdate = (updatedEnvelope: Envelope) => {
-    setEnvelopes(prevEnvelopes => prevEnvelopes.map(env => env.id === updatedEnvelope.id ? updatedEnvelope : env));
-  };
-
-  const handleTransactionEdit = (updatedTransaction: Transaction) => {
-    setTransactions(prevTransactions => {
-      const newTransactions = prevTransactions.map(tx => tx.id === updatedTransaction.id ? updatedTransaction : tx);
-      setEnvelopes(calculateEnvelopeSpending(envelopes, newTransactions));
-      setAccounts(calculateAccountBalances(accounts, newTransactions));
-      return newTransactions;
+  const handleTransactionEdit = (updated: Transaction) => {
+    setTransactions(prev => {
+      const next = prev.map(t => t.id === updated.id ? updated : t);
+      setEnvelopes(calculateEnvelopeSpending(envelopes, next));
+      setAccounts(calculateAccountBalances(accounts, next));
+      return next;
     });
   };
 
-  const handleTransactionDelete = (transactionId: string) => {
-    setTransactions(prevTransactions => {
-      const newTransactions = prevTransactions.filter(tx => tx.id !== transactionId);
-      setEnvelopes(calculateEnvelopeSpending(envelopes, newTransactions));
-      setAccounts(calculateAccountBalances(accounts, newTransactions));
-      return newTransactions;
+  const handleTransactionDelete = (id: string) => {
+    setTransactions(prev => {
+      const next = prev.filter(t => t.id !== id);
+      setEnvelopes(calculateEnvelopeSpending(envelopes, next));
+      setAccounts(calculateAccountBalances(accounts, next));
+      return next;
     });
   };
 
-  const handleCreateEnvelope = (newEnvelope: Envelope) => {
-    setEnvelopes(prevEnvelopes => [...prevEnvelopes, newEnvelope]);
-  };
+  // ── Filtered transactions ────────────────────────────────────────────────────
 
-  const handleDeleteEnvelope = (envelopeId: string) => {
-    // Remove envelope and unassign any transactions linked to it
-    setEnvelopes(prevEnvelopes => prevEnvelopes.filter(env => env.id !== envelopeId));
-    // Unassign transactions from deleted envelope (don't delete transactions)
-    setTransactions(prevTransactions => prevTransactions.map(tx => 
-      tx.envelopeId === envelopeId ? { ...tx, envelopeId: undefined } : tx
-    ));
-  };
+  const filteredTransactions = transactions.filter(t => {
+    if (txSearch && !t.description.toLowerCase().includes(txSearch.toLowerCase())) return false;
+    if (txAccountFilter && t.accountId !== txAccountFilter) return false;
+    if (txEnvelopeFilter && t.envelopeId !== txEnvelopeFilter) return false;
+    const d = t.date instanceof Date ? t.date : new Date(t.date);
+    if (txDateFrom && d < new Date(txDateFrom)) return false;
+    if (txDateTo && d > new Date(txDateTo + 'T23:59:59')) return false;
+    return true;
+  }).slice().sort((a, b) => {
+    const da = a.date instanceof Date ? a.date : new Date(a.date);
+    const db = b.date instanceof Date ? b.date : new Date(b.date);
+    return db.getTime() - da.getTime();
+  });
+
+  // Running balance (newest-first list — show balance before each transaction)
+  const runningBalances = (() => {
+    const sorted = [...transactions].sort((a, b) => {
+      const da = a.date instanceof Date ? a.date : new Date(a.date);
+      const db = b.date instanceof Date ? b.date : new Date(b.date);
+      return da.getTime() - db.getTime();
+    });
+    const balMap = new Map<string, number>();
+    sorted.forEach(t => balMap.set(t.id, (balMap.get(t.id) ?? 0)));
+    let running = 0;
+    const result = new Map<string, number>();
+    sorted.forEach(t => {
+      running += t.amount;
+      result.set(t.id, running);
+    });
+    return result;
+  })();
+
+  // ── Spending insights ────────────────────────────────────────────────────────
+
+  const spendingInsights = (() => {
+    const now = new Date();
+    const insights: string[] = [];
+
+    for (let i = 0; i < 2; i++) {
+      const mo = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const me = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+      const spent = transactions
+        .filter(t => {
+          const d = t.date instanceof Date ? t.date : new Date(t.date);
+          return t.amount < 0 && d >= mo && d <= me;
+        })
+        .reduce((s, t) => s + Math.abs(t.amount), 0);
+      if (i === 0 && spent > 0) insights.push(`This month you've spent $${spent.toFixed(2)} so far.`);
+      if (i === 1 && spent > 0) {
+        const thisMo = transactions
+          .filter(t => {
+            const d = t.date instanceof Date ? t.date : new Date(t.date);
+            const m0 = new Date(now.getFullYear(), now.getMonth(), 1);
+            const m1 = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            return t.amount < 0 && d >= m0 && d <= m1;
+          })
+          .reduce((s, t) => s + Math.abs(t.amount), 0);
+        const diff = thisMo - spent;
+        if (Math.abs(diff) > 1) {
+          insights.push(diff > 0
+            ? `You're spending $${diff.toFixed(2)} more than last month.`
+            : `You're spending $${Math.abs(diff).toFixed(2)} less than last month. Great job!`);
+        }
+      }
+    }
+
+    const overspent = envelopes.filter(e => e.allocated > 0 && e.spent > e.allocated);
+    if (overspent.length > 0) {
+      insights.push(`${overspent.length} envelope${overspent.length > 1 ? 's are' : ' is'} overspent: ${overspent.map(e => e.name).join(', ')}.`);
+    }
+
+    const nearLimit = envelopes.filter(e => e.allocated > 0 && e.spent / e.allocated >= 0.8 && e.spent <= e.allocated);
+    if (nearLimit.length > 0) {
+      insights.push(`${nearLimit.map(e => e.name).join(', ')} ${nearLimit.length > 1 ? 'are' : 'is'} near the budget limit (≥80%).`);
+    }
+
+    return insights;
+  })();
+
+  // ── Render ───────────────────────────────────────────────────────────────────
+
+  const navBtn = (view: ViewMode, label: string) => (
+    <button
+      key={view}
+      onClick={() => setCurrentView(view)}
+      className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium whitespace-nowrap transition-colors ${
+        currentView === view ? 'text-gray-900' : 'text-gray-500 hover:text-gray-700'
+      }`}
+      style={{ borderBottomColor: currentView === view ? 'var(--color-primary-blue)' : 'transparent' }}
+    >
+      {label}
+    </button>
+  );
 
   const renderLanding = () => (
     <div className="px-4 py-12 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
         <div className="space-y-6">
           <div className="flex items-center space-x-3">
-            <img 
-              src="/images/capsule-logo.svg" 
-              alt="Capsule Logo" 
-              className="w-12 h-12"
-            />
+            <img src="/images/capsule-logo.svg" alt="Capsule" className="w-12 h-12" />
             <span className="text-lg font-bold" style={{ color: 'var(--color-dark-navy)' }}>Capsule</span>
           </div>
           <h1 className="text-4xl sm:text-5xl font-bold leading-tight" style={{ color: 'var(--color-dark-navy)' }}>
@@ -441,62 +479,418 @@ export default function BudgetDashboard() {
             Create envelopes, track spending, and auto-allocate income across accounts. Get set up in minutes with our guided wizard.
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              onClick={() => setShowAuthModal(true)}
+            <button onClick={() => setShowAuthModal(true)}
               className="inline-flex justify-center items-center px-5 py-3 rounded-lg text-white font-semibold shadow hover:opacity-90 transition-opacity"
-              style={{ backgroundColor: 'var(--color-primary-blue)' }}
-            >
+              style={{ backgroundColor: 'var(--color-primary-blue)' }}>
               Get Started
             </button>
-            <button
-              onClick={() => setShowAuthModal(true)}
+            <button onClick={() => setShowAuthModal(true)}
               className="inline-flex justify-center items-center px-5 py-3 rounded-lg border-2 font-semibold transition-colors"
-              style={{ borderColor: 'var(--color-primary-blue)', color: 'var(--color-primary-blue)' }}
-            >
+              style={{ borderColor: 'var(--color-primary-blue)', color: 'var(--color-primary-blue)' }}>
               Sign In
             </button>
           </div>
           <div className="flex items-center gap-4 text-sm text-gray-500">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-finance-green)' }} aria-hidden="true"></span>
+            <span className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-finance-green)' }} />
               Auto-save & offline-ready data
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-primary-blue)' }} aria-hidden="true"></span>
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-primary-blue)' }} />
               Guided setup wizard
-            </div>
+            </span>
           </div>
         </div>
         <div className="bg-white shadow-xl rounded-2xl p-6 border border-gray-100">
-          <div className="flex flex-col items-center justify-center mb-8">
-            <img 
-              src="/images/capsule-logo.svg" 
-              alt="Capsule Logo" 
-              className="w-24 h-24 mb-4"
-            />
-            <h2 className="text-2xl font-bold text-center" style={{ color: 'var(--color-dark-navy)' }}>
-              Capsule
-            </h2>
+          <div className="flex flex-col items-center mb-8">
+            <img src="/images/capsule-logo.svg" alt="Capsule" className="w-24 h-24 mb-4" />
+            <h2 className="text-2xl font-bold" style={{ color: 'var(--color-dark-navy)' }}>Capsule</h2>
             <p className="text-sm" style={{ color: 'var(--color-finance-green)' }}>Smart Envelope Budgeting</p>
           </div>
           <div className="grid grid-cols-1 gap-4">
-            <div className="p-4 rounded-xl border" style={{ backgroundColor: 'rgba(30, 115, 190, 0.05)', borderColor: 'var(--color-cloud-blue)' }}>
-              <p className="text-sm font-medium" style={{ color: 'var(--color-primary-blue)' }}>Total Balance</p>
-              <p className="text-3xl font-bold mt-2" style={{ color: 'var(--color-dark-navy)' }}>$0.00</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--color-primary-blue)' }}>Link accounts to see your starting balance</p>
-            </div>
-            <div className="p-4 rounded-xl border" style={{ backgroundColor: 'rgba(40, 167, 69, 0.05)', borderColor: 'var(--color-finance-green)' }}>
-              <p className="text-sm font-medium" style={{ color: 'var(--color-finance-green)' }}>Envelopes</p>
-              <p className="text-3xl font-bold mt-2" style={{ color: 'var(--color-dark-navy)' }}>Organize spending</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--color-finance-green)' }}>Create categories with color-coded envelopes</p>
-            </div>
-            <div className="p-4 rounded-xl border" style={{ backgroundColor: 'rgba(167, 216, 248, 0.1)', borderColor: 'var(--color-cloud-blue)' }}>
-              <p className="text-sm font-medium" style={{ color: 'var(--color-primary-blue)' }}>Income Auto-Allocation</p>
-              <p className="text-3xl font-bold mt-2" style={{ color: 'var(--color-dark-navy)' }}>Smart distribution</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--color-primary-blue)' }}>Allocate paychecks by percentage or fixed amounts</p>
-            </div>
+            {[
+              { label: 'Total Balance', body: '$0.00', sub: 'Link accounts to see your starting balance', c: 'var(--color-primary-blue)', bg: 'rgba(30,115,190,0.05)', border: 'var(--color-cloud-blue)' },
+              { label: 'Envelopes', body: 'Organize spending', sub: 'Create categories with color-coded envelopes', c: 'var(--color-finance-green)', bg: 'rgba(40,167,69,0.05)', border: 'var(--color-finance-green)' },
+              { label: 'Income Auto-Allocation', body: 'Smart distribution', sub: 'Allocate paychecks by percentage or fixed amounts', c: 'var(--color-primary-blue)', bg: 'rgba(167,216,248,0.1)', border: 'var(--color-cloud-blue)' },
+            ].map(({ label, body, sub, c, bg, border }) => (
+              <div key={label} className="p-4 rounded-xl border" style={{ backgroundColor: bg, borderColor: border }}>
+                <p className="text-sm font-medium" style={{ color: c }}>{label}</p>
+                <p className="text-2xl font-bold mt-1" style={{ color: 'var(--color-dark-navy)' }}>{body}</p>
+                <p className="text-xs mt-1" style={{ color: c }}>{sub}</p>
+              </div>
+            ))}
           </div>
         </div>
+      </div>
+    </div>
+  );
+
+  const renderDashboard = () => {
+    const assetTypes: Account['type'][] = ['checking', 'savings', 'investment'];
+    const debtTypes: Account['type'][] = ['credit_card', 'mortgage', 'loan'];
+    const totalAssets = accounts.filter(a => assetTypes.includes(a.type)).reduce((s, a) => s + a.balance, 0);
+    const totalDebt = Math.abs(accounts.filter(a => debtTypes.includes(a.type)).reduce((s, a) => s + a.balance, 0));
+    const totalBalance = accounts.reduce((s, a) => s + a.balance, 0);
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const monthTxns = transactions.filter(t => {
+      const d = t.date instanceof Date ? t.date : new Date(t.date);
+      return d >= monthStart && d <= monthEnd;
+    });
+    const totalBudget = envelopes.reduce((s, e) => s + e.allocated, 0);
+    const totalSpent = monthTxns.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+    const budgetPct = totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0;
+
+    return dashboardSections.filter(s => s.visible).map(section => {
+      switch (section.id) {
+        case 'summaryCards':
+          return (
+            <div key={section.id} className="mb-10">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                {[
+                  { label: 'Total Assets', value: `$${totalAssets.toFixed(2)}`, color: 'bg-green-500', textColor: 'text-green-600', icon: '+', view: 'accounts' as ViewMode },
+                  { label: 'Total Debt', value: `$${totalDebt.toFixed(2)}`, color: 'bg-red-500', textColor: 'text-red-600', icon: '−', view: 'accounts' as ViewMode },
+                  { label: 'Net Worth', value: `$${totalBalance.toFixed(2)}`, color: 'bg-blue-500', textColor: totalBalance >= 0 ? 'text-blue-600' : 'text-red-600', icon: '$', view: 'accounts' as ViewMode },
+                  { label: 'Envelopes', value: envelopes.length.toString(), color: 'bg-purple-500', textColor: 'text-purple-600', icon: 'E', view: 'envelopes' as ViewMode },
+                  { label: 'Transactions', value: transactions.length.toString(), color: 'bg-orange-500', textColor: 'text-gray-900', icon: 'T', view: 'transactions' as ViewMode },
+                ].map(({ label, value, color, textColor, icon, view }) => (
+                  <button key={label} onClick={() => setCurrentView(view)}
+                    className="bg-white shadow rounded-lg p-5 hover:shadow-md transition-shadow text-left">
+                    <div className="flex items-center">
+                      <div className={`w-8 h-8 ${color} rounded-md flex items-center justify-center flex-shrink-0`}>
+                        <span className="text-white text-sm font-bold">{icon}</span>
+                      </div>
+                      <div className="ml-4 min-w-0">
+                        <p className="text-xs text-gray-500 truncate">{label}</p>
+                        <p className={`text-base font-semibold ${textColor}`}>{value}</p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+
+        case 'charts':
+          return (
+            <div key={section.id} className="mb-10">
+              <DashboardCharts accounts={accounts} envelopes={envelopes} transactions={transactions} />
+            </div>
+          );
+
+        case 'insights':
+          return spendingInsights.length > 0 ? (
+            <div key={section.id} className="mb-10">
+              <div className="bg-white shadow rounded-lg p-6">
+                <h3 className="text-lg font-medium text-gray-900 mb-3">Spending Insights</h3>
+                <ul className="space-y-2">
+                  {spendingInsights.map((insight, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                      <span className="mt-0.5 text-blue-500 flex-shrink-0">•</span>
+                      {insight}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ) : null;
+
+        case 'budgetProgress':
+          return (
+            <div key={section.id} className="mb-10">
+              <div className="bg-white shadow rounded-lg p-6">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Budget Progress This Month</h3>
+                <div className="flex justify-between items-center mb-2 text-sm font-medium text-gray-700">
+                  <span>Total Spending</span>
+                  <span>${totalSpent.toFixed(2)} / ${totalBudget.toFixed(2)}</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-3">
+                  <div className={`h-3 rounded-full transition-all ${budgetPct >= 100 ? 'bg-red-500' : budgetPct >= 80 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                    style={{ width: `${Math.min(budgetPct, 100)}%` }} />
+                </div>
+                <p className="text-sm text-gray-500 mt-2">{budgetPct}% of monthly budget used</p>
+                {/* Per-envelope progress */}
+                <div className="mt-4 space-y-2">
+                  {envelopes.filter(e => e.allocated > 0).slice(0, 5).map(e => {
+                    const pct = Math.round((e.spent / e.allocated) * 100);
+                    return (
+                      <div key={e.id}>
+                        <div className="flex justify-between text-xs text-gray-600 mb-1">
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: e.color }} />
+                            {e.name}
+                            {e.rollover && <span className="text-blue-500 text-xs ml-1" title="Rollover enabled">↻</span>}
+                          </span>
+                          <span>${e.spent.toFixed(0)} / ${e.allocated.toFixed(0)}</span>
+                        </div>
+                        <div className="w-full bg-gray-100 rounded-full h-1.5">
+                          <div className={`h-1.5 rounded-full ${pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-yellow-400' : 'bg-green-400'}`}
+                            style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: pct < 80 ? e.color : undefined }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+
+        case 'goals':
+          return goals.length > 0 ? (
+            <div key={section.id} className="mb-10">
+              <div className="bg-white shadow rounded-lg p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Goals</h3>
+                  <button onClick={() => setCurrentView('goals')}
+                    className="text-sm text-blue-600 hover:text-blue-800">Manage →</button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {goals.map(g => {
+                    const pct = g.targetAmount > 0 ? Math.min(100, Math.round((g.currentAmount / g.targetAmount) * 100)) : 0;
+                    return (
+                      <div key={g.id} className="border border-gray-200 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="w-3 h-3 rounded-full" style={{ backgroundColor: g.color }} />
+                          <span className="font-medium text-gray-900 text-sm">{g.name}</span>
+                          <span className="ml-auto text-xs text-gray-500">{pct}%</span>
+                        </div>
+                        <div className="w-full bg-gray-100 rounded-full h-2 mb-2">
+                          <div className="h-2 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: g.color }} />
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-500">
+                          <span>${g.currentAmount.toFixed(2)}</span>
+                          <span>${g.targetAmount.toFixed(2)}</span>
+                        </div>
+                        {g.targetDate && (
+                          <p className="text-xs text-gray-400 mt-1">Target: {new Date(g.targetDate).toLocaleDateString()}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : null;
+
+        case 'quickActions':
+          return (
+            <div key={section.id} className="mb-10">
+              <div className="bg-white shadow rounded-lg p-6">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { icon: '➕', label: 'Add Transaction', view: 'transactions' as ViewMode, bg: 'bg-blue-50 border-blue-200 hover:bg-blue-100' },
+                    { icon: '📦', label: 'Envelopes', view: 'envelopes' as ViewMode, bg: 'bg-purple-50 border-purple-200 hover:bg-purple-100' },
+                    { icon: '🏦', label: 'Accounts', view: 'accounts' as ViewMode, bg: 'bg-green-50 border-green-200 hover:bg-green-100' },
+                    { icon: '🎯', label: 'Goals', view: 'goals' as ViewMode, bg: 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100' },
+                  ].map(({ icon, label, view, bg }) => (
+                    <button key={label} onClick={() => setCurrentView(view)}
+                      className={`p-4 border rounded-lg transition-colors text-center ${bg}`}>
+                      <div className="text-xl mb-1">{icon}</div>
+                      <span className="text-sm font-medium text-gray-900">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+
+        case 'recentTransactions':
+          return (
+            <div key={section.id} className="mb-10">
+              <div className="bg-white shadow sm:rounded-md overflow-hidden">
+                <div className="px-4 py-4 sm:px-6 flex justify-between items-center">
+                  <h3 className="text-lg font-medium text-gray-900">Recent Transactions</h3>
+                  <button onClick={() => setCurrentView('transactions')} className="text-sm text-blue-600 hover:text-blue-800">View all →</button>
+                </div>
+                <ul className="divide-y divide-gray-200">
+                  {transactions.slice().sort((a, b) => {
+                    const da = a.date instanceof Date ? a.date : new Date(a.date);
+                    const db = b.date instanceof Date ? b.date : new Date(b.date);
+                    return db.getTime() - da.getTime();
+                  }).slice(0, 5).map(t => {
+                    const env = envelopes.find(e => e.id === t.envelopeId);
+                    return (
+                      <li key={t.id} className="px-4 py-3 sm:px-6 flex items-center justify-between hover:bg-gray-50">
+                        <div className="flex items-center gap-3 min-w-0">
+                          {env && <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: env.color }} />}
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">{t.description}</p>
+                            <p className="text-xs text-gray-400">
+                              {(t.date instanceof Date ? t.date : new Date(t.date)).toLocaleDateString()}
+                              {env && ` · ${env.name}`}
+                            </p>
+                          </div>
+                        </div>
+                        <span className={`text-sm font-medium flex-shrink-0 ml-4 ${t.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {t.amount >= 0 ? '+' : '-'}${Math.abs(t.amount).toFixed(2)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </div>
+          );
+
+        default:
+          return null;
+      }
+    });
+  };
+
+  const renderTransactions = () => (
+    <div className="px-4 py-6 sm:px-0">
+      <h2 className="text-2xl font-bold text-gray-900 mb-6">Transactions</h2>
+      <DataInput
+        onTransactionsAdded={handleTransactionsAdded}
+        envelopes={envelopes}
+        accounts={accounts.map(a => ({ id: a.id, name: a.name }))}
+        transactions={transactions}
+      />
+
+      {/* Filter bar */}
+      <div className="bg-white shadow rounded-lg p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <input
+          type="text" placeholder="Search description…" value={txSearch}
+          onChange={e => setTxSearch(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <select value={txAccountFilter} onChange={e => setTxAccountFilter(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="">All accounts</option>
+          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <select value={txEnvelopeFilter} onChange={e => setTxEnvelopeFilter(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="">All envelopes</option>
+          <option value="__none__">No envelope</option>
+          {envelopes.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+        <div className="flex gap-2">
+          <input type="date" value={txDateFrom} onChange={e => setTxDateFrom(e.target.value)}
+            className="flex-1 px-2 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input type="date" value={txDateTo} onChange={e => setTxDateTo(e.target.value)}
+            className="flex-1 px-2 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+      </div>
+      {(txSearch || txAccountFilter || txEnvelopeFilter || txDateFrom || txDateTo) && (
+        <button onClick={() => { setTxSearch(''); setTxAccountFilter(''); setTxEnvelopeFilter(''); setTxDateFrom(''); setTxDateTo(''); }}
+          className="text-xs text-blue-600 hover:text-blue-800 mb-3">Clear filters</button>
+      )}
+
+      {/* Transaction list */}
+      <div className="bg-white shadow sm:rounded-md overflow-hidden">
+        <div className="px-4 py-4 sm:px-6 border-b border-gray-200 flex justify-between items-center">
+          <h3 className="text-lg font-medium text-gray-900">
+            All Transactions {filteredTransactions.length !== transactions.length && `(${filteredTransactions.length} of ${transactions.length})`}
+          </h3>
+        </div>
+        {filteredTransactions.length === 0 ? (
+          <p className="text-center text-gray-400 py-8">No transactions match your filters.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">Envelope</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">Account</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">Balance</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {filteredTransactions.map(t => {
+                  const env = envelopes.find(e => e.id === t.envelopeId);
+                  const acc = accounts.find(a => a.id === t.accountId);
+                  const runBal = runningBalances.get(t.id) ?? 0;
+                  return (
+                    <tr key={t.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 whitespace-nowrap text-gray-500">
+                        {(t.date instanceof Date ? t.date : new Date(t.date)).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-medium text-gray-900">{t.description}</span>
+                        {t.isRecurring && <span className="ml-1 text-xs text-blue-500" title="Recurring">↻</span>}
+                      </td>
+                      <td className="px-4 py-3 hidden sm:table-cell">
+                        {env ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: env.color }} />
+                            <span className="text-gray-600">{env.name}</span>
+                          </span>
+                        ) : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{acc?.name ?? '—'}</td>
+                      <td className={`px-4 py-3 text-right font-medium ${t.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {t.amount >= 0 ? '+' : '-'}${Math.abs(t.amount).toFixed(2)}
+                      </td>
+                      <td className={`px-4 py-3 text-right hidden lg:table-cell ${runBal >= 0 ? 'text-gray-600' : 'text-red-500'}`}>
+                        ${runBal.toFixed(2)}
+                      </td>
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <button onClick={() => setEditingTransaction(t)}
+                          className="text-indigo-600 hover:text-indigo-900 mr-3 text-xs font-medium">Edit</button>
+                        <button onClick={() => { if (confirm('Delete this transaction?')) handleTransactionDelete(t.id); }}
+                          className="text-red-500 hover:text-red-800 text-xs font-medium">Delete</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderEnvelopes = () => (
+    <div className="px-4 py-6 sm:px-0">
+      <h2 className="text-2xl font-bold text-gray-900 mb-6">Envelopes</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {envelopes.map(env => {
+          const incomeAlloc = transactions.filter(t => t.envelopeId === env.id && t.amount > 0).reduce((s, t) => s + t.amount, 0);
+          const totalAlloc = env.allocated + incomeAlloc;
+          const remaining = totalAlloc - env.spent;
+          const pct = totalAlloc > 0 ? Math.min(100, Math.round((env.spent / totalAlloc) * 100)) : 0;
+          return (
+            <div key={env.id} className="bg-white shadow rounded-lg overflow-hidden">
+              <div className="h-1" style={{ backgroundColor: env.color }} />
+              <div className="p-5">
+                <div className="flex justify-between items-center mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: env.color }} />
+                    <h3 className="text-lg font-medium text-gray-900">{env.name}</h3>
+                    {env.rollover && <span className="text-xs text-blue-500 font-medium" title="Unspent rolls over">↻</span>}
+                  </div>
+                  <button onClick={() => setEditingEnvelope(env)} className="text-sm text-indigo-600 hover:text-indigo-900">Edit</button>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-2 mb-3">
+                  <div className={`h-2 rounded-full transition-all ${pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-yellow-400' : ''}`}
+                    style={{ width: `${pct}%`, backgroundColor: pct < 80 ? env.color : undefined }} />
+                </div>
+                <div className="space-y-1 text-sm text-gray-600">
+                  <div className="flex justify-between"><span>Allocated</span><span>${totalAlloc.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span>Spent</span><span>${env.spent.toFixed(2)}</span></div>
+                  <div className={`flex justify-between font-semibold ${remaining < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                    <span>Remaining</span><span>${remaining.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-6">
+        <button onClick={() => setShowCreateEnvelope(true)}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+          Create Envelope
+        </button>
       </div>
     </div>
   );
@@ -506,115 +900,60 @@ export default function BudgetDashboard() {
       {/* Navigation */}
       <nav className="bg-white shadow-sm border-b" style={{ borderBottomColor: 'var(--color-cloud-blue)' }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-            <div className="flex-shrink-0 flex items-center">
-              <div className="flex items-center space-x-3">
-                <img 
-                  src="/images/capsule-logo.svg" 
-                  alt="Capsule Logo" 
-                  className="w-10 h-10"
-                />
-                <div>
-                  <h1 className="text-xl font-bold" style={{ color: 'var(--color-dark-navy)' }}>
-                    <span className="logo-text">Capsule</span>
-                  </h1>
-                  <p className="text-xs font-medium" style={{ color: 'var(--color-primary-blue)' }}>by NeCloud</p>
+          <div className="flex h-16 items-center gap-4">
+            {/* Logo */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <img src="/images/capsule-logo.svg" alt="Capsule" className="w-9 h-9" />
+              <div className="hidden sm:block">
+                <p className="text-base font-bold leading-tight" style={{ color: 'var(--color-dark-navy)' }}>Capsule</p>
+                <p className="text-xs" style={{ color: 'var(--color-primary-blue)' }}>by NeCloud</p>
+              </div>
+            </div>
+
+            {/* Nav links — scrollable on mobile */}
+            {user && (
+              <div className="flex-1 overflow-x-auto">
+                <div className="flex gap-5 min-w-max h-16 items-end pb-1">
+                  {navBtn('dashboard', 'Dashboard')}
+                  {navBtn('accounts', 'Accounts')}
+                  {navBtn('transactions', 'Transactions')}
+                  {navBtn('envelopes', 'Envelopes')}
+                  {navBtn('goals', 'Goals')}
+                  {navBtn('rules', 'Rules')}
+                  {navBtn('settings', 'Settings')}
                 </div>
               </div>
-            </div>
-              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-                <button
-                  onClick={() => setCurrentView('dashboard')}
-                  className={`border-transparent inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
-                    currentView === 'dashboard' 
-                      ? 'border-b-2 text-gray-900' 
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                  style={{
-                    borderBottomColor: currentView === 'dashboard' ? 'var(--color-primary-blue)' : 'transparent'
-                  }}
-                >
-                  Dashboard
-                </button>
-                <button
-                  onClick={() => setCurrentView('accounts')}
-                  className={`border-transparent inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
-                    currentView === 'accounts' 
-                      ? 'border-b-2 text-gray-900' 
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                  style={{
-                    borderBottomColor: currentView === 'accounts' ? 'var(--color-primary-blue)' : 'transparent'
-                  }}
-                >
-                  Accounts
-                </button>
-                <button
-                  onClick={() => setCurrentView('transactions')}
-                  className={`border-transparent inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
-                    currentView === 'transactions' 
-                      ? 'border-b-2 text-gray-900' 
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                  style={{
-                    borderBottomColor: currentView === 'transactions' ? 'var(--color-primary-blue)' : 'transparent'
-                  }}
-                >
-                  Transactions
-                </button>
-                <button
-                  onClick={() => setCurrentView('envelopes')}
-                  className={`border-transparent inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
-                    currentView === 'envelopes' 
-                      ? 'border-b-2 text-gray-900' 
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                  style={{
-                    borderBottomColor: currentView === 'envelopes' ? 'var(--color-primary-blue)' : 'transparent'
-                  }}
-                >
-                  Envelopes
-                </button>
-                <button
-                  onClick={() => setCurrentView('settings')}
-                  className={`border-transparent inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
-                    currentView === 'settings' 
-                      ? 'border-b-2 text-gray-900' 
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                  style={{
-                    borderBottomColor: currentView === 'settings' ? 'var(--color-primary-blue)' : 'transparent'
-                  }}
-                >
-                  Settings
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
+            )}
+
+            {/* Right actions */}
+            <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+              {/* Save indicator */}
+              {saveStatus === 'saving' && (
+                <span className="text-xs text-gray-400 hidden sm:inline">Saving…</span>
+              )}
+              {saveStatus === 'saved' && (
+                <span className="text-xs text-green-600 hidden sm:inline">Saved ✓</span>
+              )}
+              {saveStatus === 'error' && (
+                <span className="text-xs text-red-500 hidden sm:inline">Save failed</span>
+              )}
+
               {user && setupCompleted && (
-                <button
-                  onClick={() => setShowGetPaidModal(true)}
-                  className="text-white px-3 py-2 rounded-md text-sm font-medium hover:opacity-90 transition-opacity"
-                  style={{ backgroundColor: 'var(--color-finance-green)' }}
-                >
+                <button onClick={() => setShowGetPaidModal(true)}
+                  className="text-white px-3 py-1.5 rounded-md text-sm font-medium hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: 'var(--color-finance-green)' }}>
                   💰 Get Paid
                 </button>
               )}
               {user ? (
-                <button
-                  onClick={handleSignOut}
-                  className="text-white px-3 py-2 rounded-md text-sm font-medium hover:opacity-90 transition-opacity"
-                  style={{ backgroundColor: '#DC2626' }}
-                >
+                <button onClick={handleSignOut}
+                  className="text-white px-3 py-1.5 rounded-md text-sm font-medium hover:opacity-90 transition-opacity bg-red-600">
                   Sign Out
                 </button>
               ) : (
-                <button
-                  onClick={() => setShowAuthModal(true)}
-                  className="text-white px-3 py-2 rounded-md text-sm font-medium hover:opacity-90 transition-opacity"
-                  style={{ backgroundColor: 'var(--color-primary-blue)' }}
-                >
+                <button onClick={() => setShowAuthModal(true)}
+                  className="text-white px-3 py-1.5 rounded-md text-sm font-medium hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: 'var(--color-primary-blue)' }}>
                   Sign In
                 </button>
               )}
@@ -626,7 +965,7 @@ export default function BudgetDashboard() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         {loading ? (
-          <div className="text-center">Loading...</div>
+          <div className="text-center py-20 text-gray-400">Loading…</div>
         ) : !user ? (
           renderLanding()
         ) : (
@@ -635,533 +974,110 @@ export default function BudgetDashboard() {
               <div className="px-4 py-6 sm:px-0">
                 <div className="flex justify-between items-center mb-8">
                   <h2 className="text-2xl font-bold text-gray-900">Dashboard</h2>
-                  <button
-                    onClick={() => setShowDashboardSettings(!showDashboardSettings)}
-                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
-                    title="Customize dashboard sections"
-                  >
-                    ⚙️ {showDashboardSettings ? 'Hide' : 'Customize'}
+                  <button onClick={() => setShowDashboardSettings(v => !v)}
+                    className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm">
+                    ⚙️ Customize
                   </button>
                 </div>
 
-                {/* Dashboard Settings Panel */}
                 {showDashboardSettings && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
-                    <h3 className="text-lg font-medium text-gray-900 mb-4">Arrange Dashboard Sections</h3>
-                    <p className="text-sm text-gray-600 mb-4">Drag sections to reorder, or toggle visibility with the checkboxes</p>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-5 mb-8">
+                    <h3 className="text-sm font-medium text-gray-900 mb-3">Arrange sections — drag to reorder</h3>
                     <div className="space-y-2">
-                      {dashboardSections.map((section, index) => (
-                        <div
-                          key={section.id}
-                          draggable
-                          onDragStart={() => setDraggedIndex(index)}
-                          onDragOver={(e) => e.preventDefault()}
+                      {dashboardSections.map((sec, i) => (
+                        <div key={sec.id} draggable
+                          onDragStart={() => setDraggedIndex(i)}
+                          onDragOver={e => e.preventDefault()}
                           onDrop={() => {
-                            if (draggedIndex !== null && draggedIndex !== index) {
-                              const newSections = [...dashboardSections];
-                              const [removed] = newSections.splice(draggedIndex, 1);
-                              newSections.splice(index, 0, removed);
-                              setDashboardSections(newSections);
+                            if (draggedIndex !== null && draggedIndex !== i) {
+                              const s = [...dashboardSections];
+                              const [r] = s.splice(draggedIndex, 1);
+                              s.splice(i, 0, r);
+                              setDashboardSections(s);
                               setDraggedIndex(null);
                             }
                           }}
-                          className={`flex items-center justify-between p-4 bg-white border-2 rounded-lg cursor-move hover:border-blue-400 transition-all ${
-                            draggedIndex === index ? 'opacity-50 border-blue-400' : 'border-gray-200'
-                          }`}
-                        >
-                          <div className="flex items-center space-x-3">
-                            <span className="text-gray-400 text-xl">⋮⋮</span>
-                            <label className="flex items-center space-x-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={section.visible}
-                                onChange={(e) => {
-                                  const newSections = [...dashboardSections];
-                                  newSections[index].visible = e.target.checked;
-                                  setDashboardSections(newSections);
-                                }}
-                                className="w-4 h-4 text-blue-600 rounded"
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                              <span className="text-sm font-medium text-gray-700">{section.label}</span>
-                            </label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <button
-                              onClick={() => {
-                                if (index > 0) {
-                                  const newSections = [...dashboardSections];
-                                  [newSections[index - 1], newSections[index]] = [newSections[index], newSections[index - 1]];
-                                  setDashboardSections(newSections);
-                                }
+                          className={`flex items-center gap-3 p-3 bg-white border-2 rounded-lg cursor-move ${draggedIndex === i ? 'opacity-50 border-blue-400' : 'border-gray-200'}`}>
+                          <span className="text-gray-400">⋮⋮</span>
+                          <label className="flex items-center gap-2 cursor-pointer flex-1">
+                            <input type="checkbox" checked={sec.visible}
+                              onChange={e => {
+                                const s = [...dashboardSections];
+                                s[i] = { ...s[i], visible: e.target.checked };
+                                setDashboardSections(s);
                               }}
-                              disabled={index === 0}
-                              className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
-                              title="Move up"
-                            >
-                              ▲
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (index < dashboardSections.length - 1) {
-                                  const newSections = [...dashboardSections];
-                                  [newSections[index], newSections[index + 1]] = [newSections[index + 1], newSections[index]];
-                                  setDashboardSections(newSections);
-                                }
-                              }}
-                              disabled={index === dashboardSections.length - 1}
-                              className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
-                              title="Move down"
-                            >
-                              ▼
-                            </button>
-                          </div>
+                              onClick={e => e.stopPropagation()}
+                              className="w-4 h-4 text-blue-600 rounded" />
+                            <span className="text-sm text-gray-700">{sec.label}</span>
+                          </label>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
-                
-                {/* Dynamic Dashboard Sections */}
-                {dashboardSections.filter(s => s.visible).map((section) => {
-                  switch (section.id) {
-                    case 'summaryCards':
-                      return (
-                        <div key={section.id} className="mb-12">
-                          {(() => {
-                            const assetTypes: Account['type'][] = ['checking', 'savings', 'investment'];
-                            const debtTypes: Account['type'][] = ['credit_card', 'mortgage', 'loan'];
-                            const totalAssets = accounts.filter(acc => assetTypes.includes(acc.type)).reduce((sum, acc) => sum + acc.balance, 0);
-                            const totalDebt = Math.abs(accounts.filter(acc => debtTypes.includes(acc.type)).reduce((sum, acc) => sum + acc.balance, 0));
-                            const totalBalance = accounts.reduce((sum, acc) => sum + acc.balance, 0);
 
-                            return (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-                      {/* Total Assets */}
-                      <button
-                        onClick={() => setCurrentView('accounts')}
-                        className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer"
-                      >
-                        <div className="p-5">
-                          <div className="flex items-center">
-                            <div className="flex-shrink-0">
-                              <div className="w-8 h-8 bg-green-500 rounded-md flex items-center justify-center">
-                                <span className="text-white text-sm font-medium">+</span>
-                              </div>
-                            </div>
-                            <div className="ml-5 w-0 flex-1">
-                              <dl>
-                                <dt className="text-sm font-medium text-gray-500 truncate">Total Assets</dt>
-                                <dd className="text-lg font-medium text-green-600">${totalAssets.toFixed(2)}</dd>
-                              </dl>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-
-                      {/* Total Debt */}
-                      <button
-                        onClick={() => setCurrentView('accounts')}
-                        className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer"
-                      >
-                        <div className="p-5">
-                          <div className="flex items-center">
-                            <div className="flex-shrink-0">
-                              <div className="w-8 h-8 bg-red-500 rounded-md flex items-center justify-center">
-                                <span className="text-white text-sm font-medium">−</span>
-                              </div>
-                            </div>
-                            <div className="ml-5 w-0 flex-1">
-                              <dl>
-                                <dt className="text-sm font-medium text-gray-500 truncate">Total Debt</dt>
-                                <dd className="text-lg font-medium text-red-600">${totalDebt.toFixed(2)}</dd>
-                              </dl>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-
-                      {/* Total Balance */}
-                      <button
-                        onClick={() => setCurrentView('accounts')}
-                        className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer"
-                      >
-                        <div className="p-5">
-                          <div className="flex items-center">
-                            <div className="flex-shrink-0">
-                              <div className="w-8 h-8 rounded-md flex items-center justify-center" style={{ backgroundColor: 'var(--color-primary-blue)' }}>
-                                <span className="text-white text-sm font-medium">$</span>
-                              </div>
-                            </div>
-                            <div className="ml-5 w-0 flex-1">
-                              <dl>
-                                <dt className="text-sm font-medium text-gray-500 truncate">Total Balance</dt>
-                                <dd className={`text-lg font-medium ${totalBalance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                                  ${totalBalance.toFixed(2)}
-                                </dd>
-                              </dl>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-
-                      {/* Envelopes */}
-                      <button
-                        onClick={() => setCurrentView('envelopes')}
-                        className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer"
-                      >
-                        <div className="p-5">
-                          <div className="flex items-center">
-                            <div className="flex-shrink-0">
-                              <div className="w-8 h-8 bg-purple-500 rounded-md flex items-center justify-center">
-                                <span className="text-white text-sm font-medium">E</span>
-                              </div>
-                            </div>
-                            <div className="ml-5 w-0 flex-1">
-                              <dl>
-                                <dt className="text-sm font-medium text-gray-500 truncate">Envelopes</dt>
-                                <dd className="text-lg font-medium text-gray-900">{envelopes.length}</dd>
-                              </dl>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-
-                      {/* Transactions */}
-                      <button
-                        onClick={() => setCurrentView('transactions')}
-                        className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer"
-                      >
-                        <div className="p-5">
-                          <div className="flex items-center">
-                            <div className="flex-shrink-0">
-                              <div className="w-8 h-8 bg-orange-500 rounded-md flex items-center justify-center">
-                                <span className="text-white text-sm font-medium">T</span>
-                              </div>
-                            </div>
-                            <div className="ml-5 w-0 flex-1">
-                              <dl>
-                                <dt className="text-sm font-medium text-gray-500 truncate">Transactions</dt>
-                                <dd className="text-lg font-medium text-gray-900">{transactions.length}</dd>
-                              </dl>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                    </div>
-                            );
-                          })()}
-                        </div>
-                      );
-
-                    case 'charts':
-                      return (
-                        <div key={section.id} className="mb-12">
-                          <DashboardCharts
-                            accounts={accounts}
-                            envelopes={envelopes}
-                            transactions={transactions}
-                          />
-                        </div>
-                      );
-
-                    case 'budgetProgress':
-                      return (
-                        <div key={section.id} className="mb-12">
-                          {(() => {
-                            const now = new Date();
-                            const currentMonth = now.getMonth();
-                            const currentYear = now.getFullYear();
-                            const monthTransactions = transactions.filter(t => {
-                              const tDate = t.date instanceof Date ? t.date : new Date(t.date);
-                              return tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
-                            });
-                            const totalBudget = envelopes.reduce((sum, env) => sum + env.allocated, 0);
-                            const totalSpent = monthTransactions.filter(t => t.amount < 0).reduce((sum, t) => sum + Math.abs(t.amount), 0);
-                            const budgetProgress = totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0;
-
-                            return (
-                              <div className="bg-white shadow rounded-lg p-6">
-                                <h3 className="text-lg font-medium text-gray-900 mb-4">Budget Progress This Month</h3>
-                                <div className="space-y-4">
-                                  <div>
-                                    <div className="flex justify-between items-center mb-2">
-                                      <span className="text-sm font-medium text-gray-700">Total Spending</span>
-                                      <span className="text-sm font-medium text-gray-900">${totalSpent.toFixed(2)} of ${totalBudget.toFixed(2)}</span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-3">
-                                      <div
-                                        className={`h-3 rounded-full transition-all ${
-                                          budgetProgress >= 100 ? 'bg-red-500' : budgetProgress >= 80 ? 'bg-yellow-500' : 'bg-green-500'
-                                        }`}
-                                        style={{ width: `${Math.min(budgetProgress, 100)}%` }}
-                                      />
-                                    </div>
-                                    <p className="text-sm text-gray-600 mt-2">{budgetProgress}% of monthly budget used</p>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      );
-
-                    case 'quickActions':
-                      return (
-                        <div key={section.id} className="mb-12">
-                          <div className="bg-white shadow rounded-lg p-6">
-                            <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
-                            <div className="grid grid-cols-2 gap-3">
-                              <button
-                                onClick={() => setCurrentView('transactions')}
-                                className="p-4 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors text-center"
-                              >
-                                <div className="text-xl mb-1">➕</div>
-                                <span className="text-sm font-medium text-gray-900">Add Transaction</span>
-                              </button>
-                              <button
-                                onClick={() => setCurrentView('envelopes')}
-                                className="p-4 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors text-center"
-                              >
-                                <div className="text-xl mb-1">📦</div>
-                                <span className="text-sm font-medium text-gray-900">Manage Envelopes</span>
-                              </button>
-                              <button
-                                onClick={() => setCurrentView('accounts')}
-                                className="p-4 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors text-center"
-                              >
-                                <div className="text-xl mb-1">🏦</div>
-                                <span className="text-sm font-medium text-gray-900">Accounts</span>
-                              </button>
-                              <button
-                                onClick={() => setShowGetPaidModal(true)}
-                                className="p-4 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors text-center"
-                              >
-                                <div className="text-xl mb-1">💰</div>
-                                <span className="text-sm font-medium text-gray-900">Record Income</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-
-                    case 'recentTransactions':
-                      return (
-                        <div key={section.id} className="mb-12">
-                          <div className="bg-white shadow overflow-hidden sm:rounded-md">
-                            <div className="px-4 py-5 sm:px-6">
-                              <h3 className="text-lg leading-6 font-medium text-gray-900">Recent Transactions</h3>
-                            </div>
-                            <ul className="divide-y divide-gray-200">
-                              {transactions.slice(-5).reverse().map((transaction) => (
-                                <li key={transaction.id}>
-                                  <div className="px-4 py-4 sm:px-6">
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex items-center">
-                                        <p className="text-sm font-medium text-gray-900">{transaction.description}</p>
-                                        <p className="ml-2 text-sm text-gray-500">
-                                          {transaction.date instanceof Date ? transaction.date.toLocaleDateString() : new Date(transaction.date).toLocaleDateString()}
-                                        </p>
-                                      </div>
-                                      <div className="flex items-center space-x-2">
-                                        <p className={`text-sm font-medium ${transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                          ${Math.abs(transaction.amount).toFixed(2)}
-                                        </p>
-                                        <button
-                                          onClick={() => setEditingTransaction(transaction)}
-                                          className="text-indigo-600 hover:text-indigo-900 text-sm font-medium transition-colors"
-                                          aria-label={`Edit transaction: ${transaction.description}`}
-                                          title={`Edit transaction: ${transaction.description}`}
-                                        >
-                                          Edit
-                                        </button>
-                                        <button
-                                          onClick={() => {
-                                            if (confirm('Are you sure you want to delete this transaction?')) {
-                                              handleTransactionDelete(transaction.id);
-                                            }
-                                          }}
-                                          className="text-red-600 hover:text-red-900 text-sm font-medium transition-colors"
-                                          aria-label={`Delete transaction: ${transaction.description}`}
-                                          title={`Delete transaction: ${transaction.description}`}
-                                        >
-                                          Delete
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      );
-
-                    default:
-                      return null;
-                  }
-                })}
+                {renderDashboard()}
               </div>
             )}
+
             {currentView === 'accounts' && (
               <div className="px-4 py-6 sm:px-0">
                 <AccountManagement
                   accounts={accounts}
                   onAccountAdd={handleAccountAdd}
                   onAccountUpdate={handleAccountUpdate}
-                  onAccountDelete={handleAccountDelete}
+                  onAccountDelete={id => setAccounts(prev => prev.filter(a => a.id !== id))}
                 />
               </div>
             )}
-            {currentView === 'transactions' && (
+
+            {currentView === 'transactions' && renderTransactions()}
+
+            {currentView === 'envelopes' && renderEnvelopes()}
+
+            {currentView === 'goals' && (
               <div className="px-4 py-6 sm:px-0">
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">Transactions</h2>
-                
-                {/* Add Transactions Form */}
-                <DataInput
-                  onTransactionsAdded={handleTransactionsAdded}
+                <GoalsManager
+                  goals={goals}
+                  accounts={accounts}
+                  onGoalsChange={setGoals}
+                />
+              </div>
+            )}
+
+            {currentView === 'rules' && (
+              <div className="px-4 py-6 sm:px-0">
+                <TransactionRulesManager
+                  rules={transactionRules}
                   envelopes={envelopes}
-                  accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
-                  transactions={transactions}
+                  onRulesChange={setTransactionRules}
                 />
-                
-                {/* All Transactions List */}
-                <div className="bg-white shadow overflow-hidden sm:rounded-md">
-                  <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900">All Transactions</h3>
-                  </div>
-                  <ul className="divide-y divide-gray-200">
-                    {transactions.map((transaction) => (
-                      <li key={transaction.id}>
-                        <div className="px-4 py-4 sm:px-6">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="text-sm font-medium text-gray-900">{transaction.description}</p>
-                              <p className="text-sm text-gray-500">
-                                {transaction.date instanceof Date ? transaction.date.toLocaleDateString() : new Date(transaction.date).toLocaleDateString()} • {accounts.find(acc => acc.id === transaction.accountId)?.name}
-                              </p>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <p className={`text-sm font-medium ${transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                ${Math.abs(transaction.amount).toFixed(2)}
-                              </p>
-                              <button
-                                onClick={() => setEditingTransaction(transaction)}
-                                className="text-indigo-600 hover:text-indigo-900 text-sm font-medium transition-colors"
-                                aria-label={`Edit transaction: ${transaction.description}`}
-                                title={`Edit transaction: ${transaction.description}`}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (confirm('Are you sure you want to delete this transaction?')) {
-                                    handleTransactionDelete(transaction.id);
-                                  }
-                                }}
-                                className="text-red-600 hover:text-red-900 text-sm"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
               </div>
             )}
-            {currentView === 'envelopes' && (
-              <div className="px-4 py-6 sm:px-0">
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">Envelopes</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {envelopes.map((envelope) => (
-                    <div key={envelope.id} className="bg-white overflow-hidden shadow rounded-lg" role="article" aria-label={`Envelope: ${envelope.name}`}>
-                      <div className="p-5">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center">
-                            <div
-                              className="w-4 h-4 rounded-full mr-3"
-                              style={{ backgroundColor: envelope.color }}
-                              role="img"
-                              aria-label={`Color indicator`}
-                            ></div>
-                            <h3 className="text-lg font-medium text-gray-900">{envelope.name}</h3>
-                          </div>
-                          <button
-                            onClick={() => setEditingEnvelope(envelope)}
-                            className="text-indigo-600 hover:text-indigo-900"
-                          >
-                            Edit
-                          </button>
-                        </div>
-                        <div className="mt-4">
-                          {(() => {
-                            // Calculate income allocated to this envelope
-                            const incomeAllocated = transactions
-                              .filter(t => t.envelopeId === envelope.id && t.amount > 0)
-                              .reduce((sum, t) => sum + t.amount, 0);
-                            const totalAllocated = envelope.allocated + incomeAllocated;
-                            const remaining = totalAllocated - envelope.spent;
-                            return (
-                              <>
-                                <div className="flex justify-between text-sm text-gray-600">
-                                  <span>Allocated</span>
-                                  <span>${totalAllocated.toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between text-sm text-gray-600">
-                                  <span>Spent</span>
-                                  <span>${envelope.spent.toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between text-sm font-medium text-gray-900">
-                                  <span>Remaining</span>
-                                  <span>${remaining.toFixed(2)}</span>
-                                </div>
-                              </>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-6">
-                  <button
-                    onClick={() => setShowCreateEnvelope(true)}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md text-sm font-medium"
-                  >
-                    Create Envelope
-                  </button>
-                </div>
-              </div>
-            )}
-            {currentView === 'settings' && user && setupCompleted && (
+
+            {currentView === 'settings' && user && (
               <Settings
                 user={user}
-                onAccountDeleted={() => {
-                  setCurrentView('dashboard');
-                  setUser(null);
-                }}
+                onAccountDeleted={() => { setCurrentView('dashboard'); setUser(null); }}
               />
             )}
           </>
         )}
       </main>
 
-      {/* Modals and Components */}
-      {showAuthModal && <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} onAuthSuccess={handleAuthSuccess} />}
-      {showSetupWizard && <SetupWizard onComplete={handleSetupComplete} onSkip={() => setShowSetupWizard(false)} userId={user?.userId || ''} />}
+      {/* Modals */}
+      {showAuthModal && (
+        <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} onAuthSuccess={() => setShowAuthModal(false)} />
+      )}
+      {showSetupWizard && (
+        <SetupWizard onComplete={handleSetupComplete} onSkip={() => setShowSetupWizard(false)} userId={user?.userId || ''} />
+      )}
       {showGetPaidModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div onClick={(e) => e.stopPropagation()} className="w-full">
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-2xl">
             <GetPaid
-              accounts={accounts}
-              envelopes={envelopes}
-              onIncomeAdded={(txns) => {
-                handleTransactionsAdded(txns);
-                setShowGetPaidModal(false);
-              }}
+              accounts={accounts} envelopes={envelopes}
+              onIncomeAdded={txns => { handleTransactionsAdded(txns); setShowGetPaidModal(false); }}
               onAccountUpdate={handleAccountUpdate}
               autoOpen={true}
             />
@@ -1171,35 +1087,30 @@ export default function BudgetDashboard() {
       {editingTransaction && (
         <TransactionEdit
           transaction={editingTransaction}
-          envelopes={envelopes.map(env => ({ id: env.id, name: env.name }))}
-          accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
-          onSave={(updatedTransaction) => {
-            handleTransactionEdit(updatedTransaction);
-            setEditingTransaction(null);
-          }}
+          envelopes={envelopes.map(e => ({ id: e.id, name: e.name }))}
+          accounts={accounts.map(a => ({ id: a.id, name: a.name }))}
+          onSave={t => { handleTransactionEdit(t); setEditingTransaction(null); }}
           onCancel={() => setEditingTransaction(null)}
         />
       )}
       {showCreateEnvelope && (
         <EnvelopeCreate
-          onEnvelopeCreated={(newEnvelope) => {
-            handleCreateEnvelope(newEnvelope);
-            setShowCreateEnvelope(false);
-          }}
+          onEnvelopeCreated={env => { setEnvelopes(prev => [...prev, env]); setShowCreateEnvelope(false); }}
           onCancel={() => setShowCreateEnvelope(false)}
-          accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
+          accounts={accounts.map(a => ({ id: a.id, name: a.name }))}
         />
       )}
       {editingEnvelope && (
         <EnvelopeEdit
           envelope={editingEnvelope}
-          onEnvelopeUpdated={(updatedEnvelope) => {
-            handleEnvelopeUpdate(updatedEnvelope);
+          onEnvelopeUpdated={env => { setEnvelopes(prev => prev.map(e => e.id === env.id ? env : e)); setEditingEnvelope(null); }}
+          onEnvelopeDeleted={id => {
+            setEnvelopes(prev => prev.filter(e => e.id !== id));
+            setTransactions(prev => prev.map(t => t.envelopeId === id ? { ...t, envelopeId: undefined } : t));
             setEditingEnvelope(null);
           }}
-          onEnvelopeDeleted={handleDeleteEnvelope}
           onCancel={() => setEditingEnvelope(null)}
-          accounts={accounts.map(acc => ({ id: acc.id, name: acc.name }))}
+          accounts={accounts.map(a => ({ id: a.id, name: a.name }))}
         />
       )}
     </div>

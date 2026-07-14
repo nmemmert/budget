@@ -301,6 +301,56 @@ export default function DashboardCharts({ accounts, envelopes, transactions, vis
       </div>
       )}
 
+      {/* Monthly Spending History (Last 6 Months) */}
+      <div className="bg-white rounded-lg shadow-sm border p-6 lg:col-span-2">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Monthly Spending History (Last 6 Months)</h3>
+        {(() => {
+          const months = Array.from({ length: 6 }, (_, i) => {
+            const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+            return { year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }) };
+          });
+          const monthlyData = months.map(m => {
+            const start = new Date(m.year, m.month, 1);
+            const end = new Date(m.year, m.month + 1, 0, 23, 59, 59);
+            const income = transactions.filter(t => {
+              const d = t.date instanceof Date ? t.date : new Date(t.date);
+              return t.amount > 0 && !t.envelopeId && d >= start && d <= end;
+            }).reduce((s, t) => s + t.amount, 0);
+            const spent = transactions.filter(t => {
+              const d = t.date instanceof Date ? t.date : new Date(t.date);
+              return t.amount < 0 && d >= start && d <= end;
+            }).reduce((s, t) => s + Math.abs(t.amount), 0);
+            return { ...m, income, spent };
+          });
+          const maxVal = Math.max(...monthlyData.map(m => Math.max(m.income, m.spent)), 1);
+          return monthlyData.some(m => m.income > 0 || m.spent > 0) ? (
+            <div>
+              <div className="flex items-end justify-between h-40 gap-3">
+                {monthlyData.map(m => (
+                  <div key={m.label} className="flex-1 flex flex-col items-center gap-1">
+                    <div className="w-full flex items-end gap-0.5 h-32">
+                      <div className="flex-1 bg-green-400 rounded-t hover:bg-green-500 transition-colors relative group"
+                        style={{ height: `${(m.income / maxVal) * 100}%`, minHeight: m.income > 0 ? '4px' : '0' }}>
+                        {m.income > 0 && <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs py-0.5 px-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap">${m.income.toFixed(0)}</div>}
+                      </div>
+                      <div className="flex-1 bg-red-400 rounded-t hover:bg-red-500 transition-colors relative group"
+                        style={{ height: `${(m.spent / maxVal) * 100}%`, minHeight: m.spent > 0 ? '4px' : '0' }}>
+                        {m.spent > 0 && <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs py-0.5 px-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap">${m.spent.toFixed(0)}</div>}
+                      </div>
+                    </div>
+                    <span className="text-xs text-gray-500">{m.label}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-4 mt-3 justify-center text-xs text-gray-600">
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-400 inline-block" />Income</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-400 inline-block" />Expenses</span>
+              </div>
+            </div>
+          ) : <p className="text-gray-500 text-sm">No data yet. Add transactions to see history.</p>;
+        })()}
+      </div>
+
       {/* Daily Spending Chart (Last 7 Days) */}
       {visibleCharts.dailySpending && (
       <div className="bg-white rounded-lg shadow-sm border p-6 lg:col-span-2">

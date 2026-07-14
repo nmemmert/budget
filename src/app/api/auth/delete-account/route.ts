@@ -2,24 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { FileStorageService } from '@/lib/fileStorage';
 
 export async function POST(request: NextRequest) {
+  const token = request.headers.get('x-session-token');
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const session = await FileStorageService.validateSession(token);
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
   try {
-    const userId = request.headers.get('x-user-id');
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 401 }
-      );
-    }
-
-    // Delete user account and all data
-    await FileStorageService.deleteUser(userId);
-
+    await FileStorageService.deleteUser(session.userId, token);
     return NextResponse.json({ success: true, message: 'Account deleted successfully' });
   } catch (error: any) {
-    return NextResponse.json(
-      { error: error.message || 'Account deletion failed' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message || 'Account deletion failed' }, { status: 500 });
   }
 }
