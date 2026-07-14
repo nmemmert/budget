@@ -30,6 +30,7 @@ interface Account {
   accountNumber?: string;
   color: string;
   isActive: boolean;
+  excludeFromBudget?: boolean;
   defaultPaycheckAmount?: number;
 }
 
@@ -144,13 +145,15 @@ export default function BudgetDashboard() {
 
   // ── Derived helpers ──────────────────────────────────────────────────────────
 
-  const calculateEnvelopeSpending = useCallback((envs: Envelope[], txns: Transaction[]): Envelope[] =>
-    envs.map(envelope => {
+  const calculateEnvelopeSpending = useCallback((envs: Envelope[], txns: Transaction[], accs?: Account[]): Envelope[] => {
+    const excludedIds = new Set((accs ?? accounts).filter(a => a.excludeFromBudget).map(a => a.id));
+    return envs.map(envelope => {
       const spent = txns
-        .filter(t => t.envelopeId === envelope.id && t.amount < 0)
+        .filter(t => t.envelopeId === envelope.id && t.amount < 0 && !excludedIds.has(t.accountId))
         .reduce((sum, t) => sum + Math.abs(t.amount), 0);
       return { ...envelope, spent };
-    }), []);
+    });
+  }, [accounts]);
 
   const calculateAccountBalances = useCallback((accs: Account[], txns: Transaction[]): Account[] => {
     const map = new Map<string, number>();
@@ -929,10 +932,10 @@ export default function BudgetDashboard() {
       return e.allocated + incomeAlloc > 0 && e.spent > e.allocated + incomeAlloc;
     });
 
-    // Available to budget = all asset accounts minus total envelope allocations
+    // Available to budget = all asset accounts (excluding budget-excluded ones) minus total envelope allocations
     const LIABILITY_TYPES = ['credit_card', 'mortgage', 'loan'];
     const liquidBalance = accounts
-      .filter(a => !LIABILITY_TYPES.includes(a.type))
+      .filter(a => !LIABILITY_TYPES.includes(a.type) && !a.excludeFromBudget)
       .reduce((s, a) => s + a.balance, 0);
     const totalAllocated = envelopes.reduce((s, e) => s + e.allocated, 0);
     const availableToBudget = liquidBalance - totalAllocated;

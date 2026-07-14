@@ -12,6 +12,7 @@ interface Account {
   accountNumber?: string;
   color: string;
   isActive: boolean;
+  excludeFromBudget?: boolean;
 }
 
 interface AccountManagementProps {
@@ -187,6 +188,9 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
                     <p className={`text-sm ${account.isActive ? 'text-green-600' : 'text-gray-500'}`}>
                       {account.isActive ? 'Active' : 'Inactive'}
                     </p>
+                    {account.excludeFromBudget && (
+                      <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">excluded from budget</span>
+                    )}
                   </div>
 
                   <div className="flex space-x-2">
@@ -314,6 +318,20 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
                   className="mr-2"
                 />
                 <label htmlFor="isActive" className="text-sm text-gray-700">Active Account</label>
+              </div>
+
+              <div className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  id="excludeFromBudget"
+                  checked={formData.excludeFromBudget ?? false}
+                  onChange={(e) => setFormData(prev => ({ ...prev, excludeFromBudget: e.target.checked }))}
+                  className="mr-2 mt-0.5"
+                />
+                <label htmlFor="excludeFromBudget" className="text-sm text-gray-700">
+                  Exclude from budget tracking
+                  <span className="block text-xs text-gray-400">Transactions on this account won't count against envelopes or expenses (e.g. mortgage payments)</span>
+                </label>
               </div>
 
               <div className="flex justify-end space-x-3 pt-4">
