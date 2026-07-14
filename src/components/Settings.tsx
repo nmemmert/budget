@@ -15,40 +15,57 @@ export default function Settings({ user, onAccountDeleted }: SettingsProps) {
   const [showClearDataConfirm, setShowClearDataConfirm] = useState(false);
   const [deleteInput, setDeleteInput] = useState('');
   const [clearDataInput, setClearDataInput] = useState('');
-  const [resetEmail, setResetEmail] = useState('');
-  const [resetCode, setResetCode] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handlePasswordReset = async (e: React.FormEvent) => {
+  const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage(null);
+    if (newPassword !== confirmPassword) {
+      setMessage({ type: 'error', text: 'New passwords do not match.' });
+      return;
+    }
+    if (newPassword.length < 8) {
+      setMessage({ type: 'error', text: 'New password must be at least 8 characters.' });
+      return;
+    }
     setLoading(true);
-
     try {
-      // In a real app, this would send an email with a reset code
-      // For now, we'll show a simplified flow
-      const response = await fetch('/api/auth/reset-password', {
+      // Verify current password by attempting login
+      const loginRes = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: resetEmail || user.email, code: resetCode, newPassword }),
+        body: JSON.stringify({ email: user.email, password: currentPassword }),
       });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Password reset failed');
+      if (!loginRes.ok) {
+        setMessage({ type: 'error', text: 'Current password is incorrect.' });
+        return;
       }
-
-      setMessage({ type: 'success', text: 'Password reset successfully! Please sign in again.' });
-      setResetCode('');
-      setNewPassword('');
+      // Generate a reset token and use it to set the new password
+      const tokenRes = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'request', email: user.email }),
+      });
+      if (!tokenRes.ok) throw new Error('Failed to initiate password change');
+      const { token } = await tokenRes.json();
+      const resetRes = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reset', token, newPassword }),
+      });
+      if (!resetRes.ok) {
+        const err = await resetRes.json();
+        throw new Error(err.error || 'Password change failed');
+      }
+      setMessage({ type: 'success', text: 'Password changed successfully! Signing out...' });
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
       setTimeout(() => AuthService.signOut(), 2000);
     } catch (error) {
-      setMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Password reset failed',
-      });
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Password change failed' });
     } finally {
       setLoading(false);
     }
@@ -106,11 +123,12 @@ export default function Settings({ user, onAccountDeleted }: SettingsProps) {
 
     setLoading(true);
     try {
+      const token = AuthService.getSessionToken();
       const response = await fetch('/api/auth/delete-account', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-id': user.userId,
+          'x-session-token': token ?? '',
         },
       });
 
@@ -206,61 +224,30 @@ export default function Settings({ user, onAccountDeleted }: SettingsProps) {
       {/* Password Tab */}
       {activeTab === 'password' && (
         <div className="bg-white rounded-lg shadow-sm border p-6 max-w-md">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Reset Password</h3>
-          <form onSubmit={handlePasswordReset} className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Change Password</h3>
+          <p className="text-sm text-gray-500 mb-4">Signed in as <strong>{user.email}</strong></p>
+          <form onSubmit={handlePasswordChange} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Email Address
-              </label>
-              <input
-                type="email"
-                value={resetEmail || user.email}
-                onChange={(e) => setResetEmail(e.target.value)}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
+              <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                placeholder="your@email.com"
-              />
+                placeholder="••••••••" required />
             </div>
-
-            <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm text-blue-800">
-              <p className="font-medium mb-1">Reset Code</p>
-              <p>
-                In a production app, a reset code would be sent to your email. For testing, enter any code and your new password.
-              </p>
-            </div>
-
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Reset Code
-              </label>
-              <input
-                type="text"
-                value={resetCode}
-                onChange={(e) => setResetCode(e.target.value)}
+              <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+              <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                placeholder="Enter code from email"
-              />
+                placeholder="Min. 8 characters" required />
             </div>
-
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                New Password
-              </label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+              <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-                placeholder="••••••••"
-              />
+                placeholder="••••••••" required />
             </div>
-
-            <button
-              type="submit"
-              disabled={loading || !resetCode || !newPassword}
-              className="w-full text-white py-2 px-4 rounded-md hover:opacity-90 disabled:opacity-50 transition-opacity"
-              style={{ backgroundColor: 'var(--color-primary-blue)' }}
-            >
-              {loading ? 'Resetting...' : 'Reset Password'}
+            <button type="submit" disabled={loading || !currentPassword || !newPassword || !confirmPassword}
+              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-opacity">
+              {loading ? 'Changing...' : 'Change Password'}
             </button>
           </form>
         </div>

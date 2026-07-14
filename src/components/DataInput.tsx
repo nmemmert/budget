@@ -55,6 +55,8 @@ export default function DataInput({ onTransactionsAdded, envelopes, accounts, tr
     date: Date;
     envelopeId?: string;
     accountId: string;
+    isRecurring?: boolean;
+    recurringFrequency?: 'weekly' | 'biweekly' | 'monthly' | 'yearly';
   }) => {
     const newTransaction = {
       id: crypto.randomUUID(),
@@ -103,7 +105,7 @@ export default function DataInput({ onTransactionsAdded, envelopes, accounts, tr
           transactions={transactions}
         />
       ) : (
-        <FileUpload onTransactionsParsed={handleFileTransactionsParsed} accounts={accounts} />
+        <FileUpload onTransactionsParsed={handleFileTransactionsParsed} accounts={accounts} existingTransactions={transactions as any} />
       )}
 
       {/* Help Text */}

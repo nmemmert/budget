@@ -332,9 +332,13 @@ export default function BudgetDashboard() {
           const base = normalizeBalanceByType(a.type, a.startingBalance ?? a.balance);
           return { ...a, startingBalance: base, balance: base };
         });
+        const txnsWithDates = (userData.transactions ?? []).map((t: any) => ({
+          ...t,
+          date: typeof t.date === 'string' ? new Date(t.date) : t.date,
+        }));
         setAccounts(accsWithBase);
         setEnvelopes(userData.envelopes ?? envs);
-        setTransactions(userData.transactions ?? []);
+        setTransactions(txnsWithDates);
         setGoals(userData.goals ?? []);
         setTransactionRules(userData.transactionRules ?? []);
       } else {

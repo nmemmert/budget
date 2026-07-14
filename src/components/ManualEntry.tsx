@@ -22,6 +22,8 @@ interface ManualEntryProps {
     date: Date;
     envelopeId?: string;
     accountId: string;
+    isRecurring?: boolean;
+    recurringFrequency?: 'weekly' | 'biweekly' | 'monthly' | 'yearly';
   }) => void;
   envelopes: Envelope[];
   accounts: { id: string; name: string }[];
@@ -35,6 +37,8 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts, t
   const [selectedEnvelope, setSelectedEnvelope] = useState('');
   const [selectedAccount, setSelectedAccount] = useState(accounts?.[0]?.id || '');
   const [isExpense, setIsExpense] = useState(true);
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurringFrequency, setRecurringFrequency] = useState<'weekly' | 'biweekly' | 'monthly' | 'yearly'>('monthly');
 
   // Update selected account when accounts change
   useEffect(() => {
@@ -88,6 +92,8 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts, t
       date: new Date(date),
       envelopeId: selectedEnvelope || undefined,
       accountId: selectedAccount,
+      isRecurring: isRecurring || undefined,
+      recurringFrequency: isRecurring ? recurringFrequency : undefined,
     });
 
     // Reset form
@@ -96,6 +102,7 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts, t
     setDate(new Date().toISOString().split('T')[0]);
     setSelectedEnvelope('');
     setSelectedAccount(accounts?.[0]?.id || '');
+    setIsRecurring(false);
   };
 
   if (!accounts || accounts.length === 0) {
@@ -235,6 +242,23 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts, t
             />
             <span className="text-sm font-medium text-green-600">💰 Income (Positive)</span>
           </label>
+        </div>
+
+        {/* Recurring toggle */}
+        <div className="p-3 bg-gray-50 rounded-md space-y-2">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} className="rounded" />
+            <span className="text-sm font-medium text-gray-700">↻ Make this a recurring transaction</span>
+          </label>
+          {isRecurring && (
+            <select value={recurringFrequency} onChange={e => setRecurringFrequency(e.target.value as typeof recurringFrequency)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              <option value="weekly">Weekly</option>
+              <option value="biweekly">Bi-weekly (every 2 weeks)</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          )}
         </div>
 
         <button

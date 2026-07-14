@@ -461,7 +461,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
       const amtCol = find('amount', 'amt', 'debit/credit', 'transaction amount');
       const inCol = find('credit', 'deposit', 'money in', 'additions');
       const outCol = find('debit', 'withdrawal', 'money out', 'subtractions');
-      const hasSplit = !amtCol && (inCol || outCol);
+      const hasSplit = !amtCol && !!(inCol || outCol);
 
       setCsvMapping(m => ({
         ...m,
