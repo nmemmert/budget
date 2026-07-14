@@ -41,6 +41,32 @@ export class AuthService {
     }
 
     const result = await response.json();
+
+    if (result.requiresTOTP) {
+      const err: any = new Error('2FA required');
+      err.requiresTOTP = true;
+      err.tempToken = result.tempToken;
+      throw err;
+    }
+
+    this._persist(result.user, result.sessionToken);
+    this.notifyAuthChange(result.user);
+    return result.user;
+  }
+
+  static async signInWithTOTP(tempToken: string, code: string): Promise<User> {
+    const response = await fetch('/api/auth/2fa/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tempToken, code }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || '2FA verification failed');
+    }
+
+    const result = await response.json();
     this._persist(result.user, result.sessionToken);
     this.notifyAuthChange(result.user);
     return result.user;

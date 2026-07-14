@@ -1160,6 +1160,11 @@ export default function BudgetDashboard() {
                   rules={transactionRules}
                   envelopes={envelopes}
                   onRulesChange={setTransactionRules}
+                  transactions={transactions}
+                  onApplyToExisting={updated => {
+                    setTransactions(updated as any);
+                    setEnvelopes(calculateEnvelopeSpending(envelopes, updated as any));
+                  }}
                 />
               </div>
             )}

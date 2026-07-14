@@ -5,17 +5,22 @@ import type { TransactionRule } from '../app/page';
 
 interface Envelope { id: string; name: string; color: string }
 
+interface Transaction { id: string; description: string; amount: number; envelopeId?: string }
+
 interface Props {
   rules: TransactionRule[];
   envelopes: Envelope[];
   onRulesChange: (rules: TransactionRule[]) => void;
+  transactions?: Transaction[];
+  onApplyToExisting?: (updated: Transaction[]) => void;
 }
 
-export default function TransactionRulesManager({ rules, envelopes, onRulesChange }: Props) {
+export default function TransactionRulesManager({ rules, envelopes, onRulesChange, transactions = [], onApplyToExisting }: Props) {
   const [keyword, setKeyword] = useState('');
   const [envelopeId, setEnvelopeId] = useState(envelopes[0]?.id ?? '');
   const [matchCase, setMatchCase] = useState(false);
   const [error, setError] = useState('');
+  const [applyResult, setApplyResult] = useState<string | null>(null);
 
   const handleAdd = () => {
     if (!keyword.trim()) { setError('Keyword is required.'); return; }
@@ -25,6 +30,26 @@ export default function TransactionRulesManager({ rules, envelopes, onRulesChang
   };
 
   const handleDelete = (id: string) => onRulesChange(rules.filter(r => r.id !== id));
+
+  const handleApplyToExisting = () => {
+    if (!onApplyToExisting || rules.length === 0) return;
+    let matched = 0;
+    const updated = transactions.map(tx => {
+      if (tx.envelopeId || tx.amount >= 0) return tx;
+      for (const rule of rules) {
+        const haystack = rule.matchCase ? tx.description : tx.description.toLowerCase();
+        const needle = rule.matchCase ? rule.keyword : rule.keyword.toLowerCase();
+        if (haystack.includes(needle) && envelopes.some(e => e.id === rule.envelopeId)) {
+          matched++;
+          return { ...tx, envelopeId: rule.envelopeId };
+        }
+      }
+      return tx;
+    });
+    onApplyToExisting(updated);
+    setApplyResult(`Applied rules: ${matched} transaction${matched !== 1 ? 's' : ''} categorized.`);
+    setTimeout(() => setApplyResult(null), 4000);
+  };
 
   return (
     <div>
@@ -104,6 +129,27 @@ export default function TransactionRulesManager({ rules, envelopes, onRulesChang
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {onApplyToExisting && rules.length > 0 && (
+        <div className="mt-4 bg-white shadow rounded-lg p-5 flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium text-gray-900 text-sm">Apply rules to existing transactions</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Categorize uncategorized expenses already in your history using the current rules.
+            </p>
+          </div>
+          <button onClick={handleApplyToExisting}
+            className="flex-shrink-0 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 text-sm font-medium whitespace-nowrap">
+            Run Rules Now
+          </button>
+        </div>
+      )}
+
+      {applyResult && (
+        <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
+          ✓ {applyResult}
         </div>
       )}
 

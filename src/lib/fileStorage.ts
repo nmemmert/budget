@@ -2,12 +2,14 @@ import path from 'path';
 import { promises as fsPromises } from 'fs';
 import bcrypt from 'bcryptjs';
 import { encryptData, decryptData } from '@/lib/crypto';
+import { generateSecret, verifyTOTP } from '@/lib/totp';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const RESET_TOKENS_FILE = path.join(DATA_DIR, 'reset_tokens.json');
 const SHARES_FILE = path.join(DATA_DIR, 'shares.json');
+const TEMP_TOKENS_FILE = path.join(DATA_DIR, 'temp_tokens.json');
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'default-key-change-in-production';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -27,7 +29,7 @@ interface Shares { [shareId: string]: Share }
 async function initializeDirectories() {
   try {
     await fsPromises.mkdir(DATA_DIR, { recursive: true });
-    for (const file of [USERS_FILE, SESSIONS_FILE, RESET_TOKENS_FILE, SHARES_FILE]) {
+    for (const file of [USERS_FILE, SESSIONS_FILE, RESET_TOKENS_FILE, SHARES_FILE, TEMP_TOKENS_FILE]) {
       try {
         await fsPromises.access(file);
       } catch {
@@ -45,7 +47,13 @@ interface UserCredentials {
   email: string;
   passwordHash: string;
   userId: string;
+  totpSecret?: string;
+  totpEnabled?: boolean;
+  pendingTotpSecret?: string;
 }
+
+interface TempToken { userId: string; email: string; expiresAt: string }
+interface TempTokens { [token: string]: TempToken }
 
 interface Users {
   [email: string]: UserCredentials;
@@ -133,18 +141,110 @@ export class FileStorageService {
     }
   }
 
-  static async loginUser(email: string, password: string): Promise<{ userId: string; email: string; sessionToken: string }> {
+  static async loginUser(email: string, password: string): Promise<
+    | { userId: string; email: string; sessionToken: string; requiresTOTP?: false }
+    | { requiresTOTP: true; tempToken: string }
+  > {
     const users = await readJson<Users>(USERS_FILE);
     const user = users[email];
 
-    // Always run bcrypt compare to prevent timing attacks
     const hashToCompare = user?.passwordHash ?? '$2a$12$invalidhashpadding000000000000000000000000000000000000000';
     const valid = await bcrypt.compare(password, hashToCompare);
 
     if (!user || !valid) throw new Error('Invalid credentials');
 
+    if (user.totpEnabled && user.totpSecret) {
+      const releaseLock = await FileLock.acquire('temp-tokens');
+      try {
+        const temps = await readJson<TempTokens>(TEMP_TOKENS_FILE);
+        const tempToken = crypto.randomUUID();
+        temps[tempToken] = { userId: user.userId, email: user.email, expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString() };
+        await writeJson(TEMP_TOKENS_FILE, temps);
+        return { requiresTOTP: true, tempToken };
+      } finally {
+        releaseLock();
+      }
+    }
+
     const sessionToken = await this._createSession(user.userId, email);
     return { userId: user.userId, email: user.email, sessionToken };
+  }
+
+  static async completeTOTPLogin(tempToken: string, totpCode: string): Promise<{ userId: string; email: string; sessionToken: string }> {
+    const temps = await readJson<TempTokens>(TEMP_TOKENS_FILE);
+    const record = temps[tempToken];
+    if (!record) throw new Error('Invalid or expired token');
+    if (new Date(record.expiresAt) < new Date()) throw new Error('Token expired — please sign in again');
+
+    const users = await readJson<Users>(USERS_FILE);
+    const user = Object.values(users).find(u => u.userId === record.userId);
+    if (!user?.totpSecret) throw new Error('2FA not configured');
+
+    if (!verifyTOTP(user.totpSecret, totpCode)) throw new Error('Invalid 2FA code');
+
+    const releaseLock = await FileLock.acquire('temp-tokens');
+    try {
+      const temps2 = await readJson<TempTokens>(TEMP_TOKENS_FILE);
+      delete temps2[tempToken];
+      await writeJson(TEMP_TOKENS_FILE, temps2);
+    } finally {
+      releaseLock();
+    }
+
+    const sessionToken = await this._createSession(record.userId, record.email);
+    return { userId: record.userId, email: record.email, sessionToken };
+  }
+
+  static async setup2FA(userId: string): Promise<{ secret: string; otpAuthUrl: string }> {
+    const { getOtpAuthUrl } = await import('@/lib/totp');
+    const users = await readJson<Users>(USERS_FILE);
+    const userEntry = Object.entries(users).find(([, u]) => u.userId === userId);
+    if (!userEntry) throw new Error('User not found');
+
+    const secret = generateSecret();
+    const [email, user] = userEntry;
+    users[email] = { ...user, pendingTotpSecret: secret };
+    await writeJson(USERS_FILE, users);
+
+    return { secret, otpAuthUrl: getOtpAuthUrl(secret, email) };
+  }
+
+  static async enable2FA(userId: string, token: string): Promise<void> {
+    const releaseLock = await FileLock.acquire('users-file');
+    try {
+      const users = await readJson<Users>(USERS_FILE);
+      const entry = Object.entries(users).find(([, u]) => u.userId === userId);
+      if (!entry) throw new Error('User not found');
+      const [email, user] = entry;
+      if (!user.pendingTotpSecret) throw new Error('No pending 2FA setup — start setup first');
+      if (!verifyTOTP(user.pendingTotpSecret, token)) throw new Error('Invalid code — please check your authenticator app');
+      users[email] = { ...user, totpSecret: user.pendingTotpSecret, totpEnabled: true, pendingTotpSecret: undefined };
+      await writeJson(USERS_FILE, users);
+    } finally {
+      releaseLock();
+    }
+  }
+
+  static async disable2FA(userId: string, token: string): Promise<void> {
+    const releaseLock = await FileLock.acquire('users-file');
+    try {
+      const users = await readJson<Users>(USERS_FILE);
+      const entry = Object.entries(users).find(([, u]) => u.userId === userId);
+      if (!entry) throw new Error('User not found');
+      const [email, user] = entry;
+      if (!user.totpEnabled || !user.totpSecret) throw new Error('2FA is not enabled');
+      if (!verifyTOTP(user.totpSecret, token)) throw new Error('Invalid 2FA code');
+      users[email] = { ...user, totpSecret: undefined, totpEnabled: false, pendingTotpSecret: undefined };
+      await writeJson(USERS_FILE, users);
+    } finally {
+      releaseLock();
+    }
+  }
+
+  static async get2FAStatus(userId: string): Promise<boolean> {
+    const users = await readJson<Users>(USERS_FILE);
+    const user = Object.values(users).find(u => u.userId === userId);
+    return user?.totpEnabled ?? false;
   }
 
   static async validateSession(token: string): Promise<{ userId: string; email: string } | null> {

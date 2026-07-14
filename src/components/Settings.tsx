@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AuthService } from '../lib/authService';
 import { DataService } from '../lib/dataService';
 
@@ -20,6 +20,87 @@ export default function Settings({ user, onAccountDeleted }: SettingsProps) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // 2FA state
+  const [twoFAEnabled, setTwoFAEnabled] = useState(false);
+  const [twoFASetupData, setTwoFASetupData] = useState<{ secret: string; qrDataUrl: string } | null>(null);
+  const [twoFACode, setTwoFACode] = useState('');
+  const [disableCode, setDisableCode] = useState('');
+  const [twoFALoading, setTwoFALoading] = useState(false);
+  const [twoFAMessage, setTwoFAMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    const token = AuthService.getSessionToken();
+    if (!token) return;
+    fetch('/api/auth/2fa/status', { headers: { 'x-session-token': token } })
+      .then(r => r.json())
+      .then(d => setTwoFAEnabled(d.enabled ?? false))
+      .catch(() => {});
+  }, []);
+
+  const handleSetup2FA = async () => {
+    setTwoFALoading(true);
+    setTwoFAMessage(null);
+    try {
+      const token = AuthService.getSessionToken();
+      const res = await fetch('/api/auth/2fa/setup', { method: 'POST', headers: { 'x-session-token': token ?? '' } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setTwoFASetupData({ secret: data.secret, qrDataUrl: data.qrDataUrl });
+      setTwoFACode('');
+    } catch (e: any) {
+      setTwoFAMessage({ type: 'error', text: e.message });
+    } finally {
+      setTwoFALoading(false);
+    }
+  };
+
+  const handleVerify2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTwoFALoading(true);
+    setTwoFAMessage(null);
+    try {
+      const token = AuthService.getSessionToken();
+      const res = await fetch('/api/auth/2fa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-session-token': token ?? '' },
+        body: JSON.stringify({ code: twoFACode }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setTwoFAEnabled(true);
+      setTwoFASetupData(null);
+      setTwoFACode('');
+      setTwoFAMessage({ type: 'success', text: '2FA enabled successfully!' });
+    } catch (e: any) {
+      setTwoFAMessage({ type: 'error', text: e.message });
+    } finally {
+      setTwoFALoading(false);
+    }
+  };
+
+  const handleDisable2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTwoFALoading(true);
+    setTwoFAMessage(null);
+    try {
+      const token = AuthService.getSessionToken();
+      const res = await fetch('/api/auth/2fa/disable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-session-token': token ?? '' },
+        body: JSON.stringify({ code: disableCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setTwoFAEnabled(false);
+      setDisableCode('');
+      setTwoFAMessage({ type: 'success', text: '2FA disabled.' });
+    } catch (e: any) {
+      setTwoFAMessage({ type: 'error', text: e.message });
+    } finally {
+      setTwoFALoading(false);
+    }
+  };
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -223,7 +304,8 @@ export default function Settings({ user, onAccountDeleted }: SettingsProps) {
 
       {/* Password Tab */}
       {activeTab === 'password' && (
-        <div className="bg-white rounded-lg shadow-sm border p-6 max-w-md">
+        <div className="space-y-6 max-w-md">
+        <div className="bg-white rounded-lg shadow-sm border p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-1">Change Password</h3>
           <p className="text-sm text-gray-500 mb-4">Signed in as <strong>{user.email}</strong></p>
           <form onSubmit={handlePasswordChange} className="space-y-4">
@@ -250,6 +332,83 @@ export default function Settings({ user, onAccountDeleted }: SettingsProps) {
               {loading ? 'Changing...' : 'Change Password'}
             </button>
           </form>
+        </div>
+
+        {/* 2FA Section */}
+        <div className="bg-white rounded-lg shadow-sm border p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Two-Factor Authentication</h3>
+              <p className="text-sm text-gray-500 mt-0.5">
+                {twoFAEnabled ? '🔐 2FA is enabled — your account is protected.' : 'Add an extra layer of security with an authenticator app.'}
+              </p>
+            </div>
+            <span className={`text-xs font-semibold px-2 py-1 rounded-full ${twoFAEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+              {twoFAEnabled ? 'ON' : 'OFF'}
+            </span>
+          </div>
+
+          {twoFAMessage && (
+            <div className={`mb-4 p-3 rounded-lg text-sm ${twoFAMessage.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+              {twoFAMessage.text}
+            </div>
+          )}
+
+          {!twoFAEnabled && !twoFASetupData && (
+            <button onClick={handleSetup2FA} disabled={twoFALoading}
+              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-opacity text-sm">
+              {twoFALoading ? 'Generating…' : 'Enable 2FA'}
+            </button>
+          )}
+
+          {!twoFAEnabled && twoFASetupData && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-700">Scan this QR code with <strong>Google Authenticator</strong>, <strong>Authy</strong>, or any TOTP app:</p>
+              <div className="flex justify-center">
+                <img src={twoFASetupData.qrDataUrl} alt="2FA QR Code" className="w-48 h-48 border border-gray-200 rounded-lg" />
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Or enter this code manually:</p>
+                <code className="block bg-gray-100 px-3 py-2 rounded text-sm font-mono break-all text-gray-800 select-all">{twoFASetupData.secret}</code>
+              </div>
+              <form onSubmit={handleVerify2FA} className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Enter the 6-digit code to confirm</label>
+                  <input type="text" inputMode="numeric"
+                    value={twoFACode}
+                    onChange={e => setTwoFACode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="000000"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-center text-xl tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+                    required />
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => { setTwoFASetupData(null); setTwoFACode(''); }}
+                    className="flex-1 bg-gray-100 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-200 text-sm">Cancel</button>
+                  <button type="submit" disabled={twoFALoading || twoFACode.length !== 6}
+                    className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50 text-sm">
+                    {twoFALoading ? 'Verifying…' : 'Verify & Enable'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {twoFAEnabled && (
+            <form onSubmit={handleDisable2FA} className="space-y-3">
+              <p className="text-sm text-gray-600">Enter your current 2FA code to disable:</p>
+              <input type="text" inputMode="numeric"
+                value={disableCode}
+                onChange={e => setDisableCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-center text-xl tracking-widest focus:outline-none focus:ring-2 focus:ring-red-400 bg-white text-gray-900"
+                required />
+              <button type="submit" disabled={twoFALoading || disableCode.length !== 6}
+                className="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 disabled:opacity-50 text-sm">
+                {twoFALoading ? 'Disabling…' : 'Disable 2FA'}
+              </button>
+            </form>
+          )}
+        </div>
         </div>
       )}
 
