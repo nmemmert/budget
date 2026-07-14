@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import SharedAccountManager from './SharedAccountManager';
 
 interface Account {
   id: string;
@@ -165,7 +166,8 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
         ) : (
           <div className="divide-y divide-gray-200">
             {(accounts || []).map((account) => (
-              <div key={account.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50" role="article" aria-label={`Account: ${account.name}`}>
+              <div key={account.id} className="px-6 py-4 hover:bg-gray-50" role="article" aria-label={`Account: ${account.name}`}>
+                <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
                   <div className={`w-4 h-4 rounded-full ${account.color}`} role="img" aria-label={`Color indicator: ${account.color}`}></div>
                   <div>
@@ -210,6 +212,8 @@ export default function AccountManagement({ accounts, onAccountAdd, onAccountUpd
                     </button>
                   </div>
                 </div>
+                </div>
+                <SharedAccountManager accountId={account.id} accountName={account.name} />
               </div>
             ))}
           </div>

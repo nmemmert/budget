@@ -15,6 +15,8 @@ import Settings from '../components/Settings';
 import GetPaid from '../components/GetPaid';
 import GoalsManager from '../components/GoalsManager';
 import TransactionRulesManager from '../components/TransactionRulesManager';
+import RecurringTransactionManager from '../components/RecurringTransactionManager';
+import SharedAccountManager from '../components/SharedAccountManager';
 
 interface User { userId: string; email: string }
 
@@ -112,6 +114,7 @@ export default function BudgetDashboard() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [transactionRules, setTransactionRules] = useState<TransactionRule[]>([]);
   const [setupCompleted, setSetupCompleted] = useState(false);
+  const [sharedAccounts, setSharedAccounts] = useState<Array<{ shareId: string; ownerEmail: string; account: Account; role: string }>>([]);
 
   // Transaction filters
   const [txSearch, setTxSearch] = useState('');
@@ -189,6 +192,24 @@ export default function BudgetDashboard() {
 
             // Auto-apply due recurring transactions
             autoApplyRecurring(txnsWithDates);
+
+            // Load accounts shared with me
+            const sessionToken = AuthService.getSessionToken();
+            if (sessionToken) {
+              fetch('/api/share/list', { headers: { 'x-session-token': sessionToken } })
+                .then(r => r.json())
+                .then(async (data) => {
+                  const received: any[] = data.received ?? [];
+                  const loaded = await Promise.all(received.map(async (share: any) => {
+                    const res = await fetch(`/api/share/data?shareId=${share.shareId}`, { headers: { 'x-session-token': sessionToken } });
+                    if (!res.ok) return null;
+                    const d = await res.json();
+                    return { shareId: share.shareId, ownerEmail: share.ownerEmail, account: d.account, role: share.role };
+                  }));
+                  setSharedAccounts(loaded.filter(Boolean) as any);
+                })
+                .catch(() => {});
+            }
           } else {
             setShowSetupWizard(true);
           }
@@ -200,6 +221,7 @@ export default function BudgetDashboard() {
         setAccounts([]); setEnvelopes([]); setTransactions([]);
         setGoals([]); setTransactionRules([]);
         setSetupCompleted(false); setShowSetupWizard(false);
+        setSharedAccounts([]);
       }
       setLoading(false);
     });
@@ -266,6 +288,25 @@ export default function BudgetDashboard() {
         ? { ...t, lastAppliedDate: new Date().toISOString() }
         : t);
       return [...updated, ...newTxns];
+    });
+  };
+
+  const handleApplyRecurring = (dueTxns: Transaction[]) => {
+    const now = new Date();
+    const newTxns: Transaction[] = dueTxns.map(t => ({
+      ...t,
+      id: crypto.randomUUID(),
+      date: now,
+      lastAppliedDate: now.toISOString(),
+    }));
+    setTransactions(prev => {
+      const updated = prev.map(t =>
+        dueTxns.find(d => d.id === t.id) ? { ...t, lastAppliedDate: now.toISOString() } : t
+      );
+      const next = [...updated, ...newTxns];
+      setEnvelopes(calculateEnvelopeSpending(envelopes, next));
+      setAccounts(calculateAccountBalances(accounts, next));
+      return next;
     });
   };
 
@@ -778,6 +819,11 @@ export default function BudgetDashboard() {
         transactions={transactions}
       />
 
+      <RecurringTransactionManager
+        transactions={transactions}
+        onApplyRecurring={handleApplyRecurring}
+      />
+
       {/* Filter bar */}
       <div className="bg-white shadow rounded-lg p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <input
@@ -877,17 +923,34 @@ export default function BudgetDashboard() {
     </div>
   );
 
-  const renderEnvelopes = () => (
+  const renderEnvelopes = () => {
+    const overspentEnvs = envelopes.filter(e => {
+      const incomeAlloc = transactions.filter(t => t.envelopeId === e.id && t.amount > 0).reduce((s, t) => s + t.amount, 0);
+      return e.allocated + incomeAlloc > 0 && e.spent > e.allocated + incomeAlloc;
+    });
+    return (
     <div className="px-4 py-6 sm:px-0">
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Envelopes</h2>
+      {overspentEnvs.length > 0 && (
+        <div className="mb-6 bg-red-50 border border-red-300 rounded-lg p-4 flex items-start gap-3">
+          <span className="text-red-500 text-xl flex-shrink-0">⚠️</span>
+          <div>
+            <p className="font-semibold text-red-800">Budget exceeded</p>
+            <p className="text-sm text-red-700 mt-0.5">
+              {overspentEnvs.map(e => e.name).join(', ')} {overspentEnvs.length === 1 ? 'is' : 'are'} over budget. Consider adjusting allocations or reviewing recent spending.
+            </p>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {envelopes.map(env => {
           const incomeAlloc = transactions.filter(t => t.envelopeId === env.id && t.amount > 0).reduce((s, t) => s + t.amount, 0);
           const totalAlloc = env.allocated + incomeAlloc;
           const remaining = totalAlloc - env.spent;
           const pct = totalAlloc > 0 ? Math.min(100, Math.round((env.spent / totalAlloc) * 100)) : 0;
+          const isOver = totalAlloc > 0 && env.spent > totalAlloc;
           return (
-            <div key={env.id} className="bg-white shadow rounded-lg overflow-hidden">
+            <div key={env.id} className={`bg-white shadow rounded-lg overflow-hidden ${isOver ? 'ring-2 ring-red-400' : ''}`}>
               <div className="h-1" style={{ backgroundColor: env.color }} />
               <div className="p-5">
                 <div className="flex justify-between items-center mb-3">
@@ -921,7 +984,7 @@ export default function BudgetDashboard() {
         </button>
       </div>
     </div>
-  );
+  );};
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -991,7 +1054,7 @@ export default function BudgetDashboard() {
       </nav>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8 pb-20 sm:pb-6">
         {loading ? (
           <div className="text-center py-20 text-gray-400">Loading…</div>
         ) : !user ? (
@@ -1056,6 +1119,24 @@ export default function BudgetDashboard() {
                   onAccountUpdate={handleAccountUpdate}
                   onAccountDelete={id => setAccounts(prev => prev.filter(a => a.id !== id))}
                 />
+                {sharedAccounts.length > 0 && (
+                  <div className="mt-8">
+                    <h3 className="text-lg font-semibold text-gray-700 mb-3">Shared with me</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {sharedAccounts.map(sa => (
+                        <div key={sa.shareId} className="bg-white shadow rounded-lg p-5 border border-blue-100">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="font-medium text-gray-900">{sa.account?.name}</span>
+                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded capitalize">{sa.role}</span>
+                          </div>
+                          <p className="text-xs text-gray-500 mb-1">Shared by {sa.ownerEmail}</p>
+                          <p className="text-xl font-bold text-blue-700">${(sa.account?.balance ?? 0).toFixed(2)}</p>
+                          <p className="text-xs text-gray-400 mt-1 capitalize">{sa.account?.type?.replace('_', ' ')}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1128,6 +1209,25 @@ export default function BudgetDashboard() {
           accounts={accounts.map(a => ({ id: a.id, name: a.name }))}
         />
       )}
+      {/* Mobile bottom nav */}
+      {user && setupCompleted && (
+        <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 flex">
+          {([
+            { view: 'dashboard', icon: '🏠', label: 'Home' },
+            { view: 'accounts', icon: '🏦', label: 'Accounts' },
+            { view: 'transactions', icon: '↕', label: 'Txns' },
+            { view: 'envelopes', icon: '📦', label: 'Envelopes' },
+            { view: 'settings', icon: '⚙️', label: 'More' },
+          ] as { view: ViewMode; icon: string; label: string }[]).map(({ view, icon, label }) => (
+            <button key={view} onClick={() => setCurrentView(view)}
+              className={`flex-1 flex flex-col items-center py-2 gap-0.5 text-xs transition-colors ${currentView === view ? 'text-blue-600' : 'text-gray-500'}`}>
+              <span className="text-lg leading-none">{icon}</span>
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+      )}
+
       {editingEnvelope && (
         <EnvelopeEdit
           envelope={editingEnvelope}

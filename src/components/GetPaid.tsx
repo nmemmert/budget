@@ -35,12 +35,20 @@ interface Transaction {
 type DistributionMethod = 'proportional' | 'equal' | 'custom';
 type AllocationMap = Record<string, number>;
 
+interface PaycheckSchedule {
+  frequency: 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
+  dayOfWeek?: number; // 0-6, for weekly/biweekly
+  dayOfMonth?: number; // 1-31, for monthly/semimonthly
+  dayOfMonth2?: number; // for semimonthly second date
+}
+
 interface PaycheckTemplate {
   amount: number;
   selectedAccountId: string;
   description: string;
   distributionMethod: DistributionMethod;
   customAllocations: AllocationMap;
+  schedule?: PaycheckSchedule;
 }
 
 interface GetPaidProps {
@@ -70,6 +78,8 @@ export default function GetPaid({
   const [defaultAmountInput, setDefaultAmountInput] = useState('');
   const [saveTemplate, setSaveTemplate] = useState(false);
   const [savedTemplate, setSavedTemplate] = useState<PaycheckTemplate | null>(null);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [schedule, setSchedule] = useState<PaycheckSchedule>({ frequency: 'biweekly', dayOfWeek: 5 });
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -122,12 +132,37 @@ export default function GetPaid({
 
   const applySavedTemplate = () => {
     if (!savedTemplate) return;
-
     setAmount(savedTemplate.amount?.toString() || '');
     setSelectedAccountId(savedTemplate.selectedAccountId || '');
     setDescription(savedTemplate.description || 'Paycheck');
     setDistributionMethod(savedTemplate.distributionMethod || 'proportional');
     setCustomAllocations(savedTemplate.customAllocations || {});
+    if (savedTemplate.schedule) setSchedule(savedTemplate.schedule);
+  };
+
+  const computeNextPayday = (sched: PaycheckSchedule): Date => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const next = new Date(today);
+
+    if (sched.frequency === 'weekly' || sched.frequency === 'biweekly') {
+      const dow = sched.dayOfWeek ?? 5;
+      const diff = (dow - today.getDay() + 7) % 7 || (sched.frequency === 'biweekly' ? 14 : 7);
+      next.setDate(today.getDate() + diff);
+    } else if (sched.frequency === 'semimonthly') {
+      const d1 = sched.dayOfMonth ?? 1;
+      const d2 = sched.dayOfMonth2 ?? 15;
+      const thisMonthD1 = new Date(today.getFullYear(), today.getMonth(), d1);
+      const thisMonthD2 = new Date(today.getFullYear(), today.getMonth(), d2);
+      const nextMonthD1 = new Date(today.getFullYear(), today.getMonth() + 1, d1);
+      const candidates = [thisMonthD1, thisMonthD2, nextMonthD1].filter(d => d > today);
+      return candidates.sort((a, b) => a.getTime() - b.getTime())[0] ?? nextMonthD1;
+    } else {
+      const dom = sched.dayOfMonth ?? 1;
+      next.setDate(dom);
+      if (next <= today) next.setMonth(next.getMonth() + 1);
+    }
+    return next;
   };
 
   const handleSubmit = (event: React.FormEvent) => {
@@ -183,6 +218,7 @@ export default function GetPaid({
         description,
         distributionMethod,
         customAllocations: previewAllocations,
+        schedule: showSchedule ? schedule : undefined,
       };
       localStorage.setItem('paycheckTemplate', JSON.stringify(template));
       setSavedTemplate(template);
@@ -384,17 +420,67 @@ export default function GetPaid({
                 />
               </div>
 
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="saveTemplate"
-                  checked={saveTemplate}
-                  onChange={(event) => setSaveTemplate(event.target.checked)}
-                  className="mr-2"
-                />
-                <label htmlFor="saveTemplate" className="text-sm text-gray-700">
-                  Save this information to use next time
+              <div className="space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" id="saveTemplate" checked={saveTemplate} onChange={e => setSaveTemplate(e.target.checked)} className="rounded" />
+                  <span className="text-sm text-gray-700">Save this information to use next time</span>
                 </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={showSchedule} onChange={e => setShowSchedule(e.target.checked)} className="rounded" />
+                  <span className="text-sm text-gray-700">Set a paycheck schedule (shows next payday)</span>
+                </label>
+                {showSchedule && (
+                  <div className="ml-6 p-3 bg-green-50 border border-green-200 rounded-lg space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Frequency</label>
+                      <select value={schedule.frequency} onChange={e => setSchedule(s => ({ ...s, frequency: e.target.value as PaycheckSchedule['frequency'] }))}
+                        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white text-gray-900">
+                        <option value="weekly">Weekly</option>
+                        <option value="biweekly">Bi-weekly (every 2 weeks)</option>
+                        <option value="semimonthly">Semi-monthly (twice a month)</option>
+                        <option value="monthly">Monthly</option>
+                      </select>
+                    </div>
+                    {(schedule.frequency === 'weekly' || schedule.frequency === 'biweekly') && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Payday</label>
+                        <select value={schedule.dayOfWeek ?? 5} onChange={e => setSchedule(s => ({ ...s, dayOfWeek: parseInt(e.target.value) }))}
+                          className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white text-gray-900">
+                          {['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((d, i) => (
+                            <option key={i} value={i}>{d}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {schedule.frequency === 'semimonthly' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">First payday</label>
+                          <input type="number" min={1} max={31} value={schedule.dayOfMonth ?? 1}
+                            onChange={e => setSchedule(s => ({ ...s, dayOfMonth: parseInt(e.target.value) }))}
+                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white text-gray-900" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">Second payday</label>
+                          <input type="number" min={1} max={31} value={schedule.dayOfMonth2 ?? 15}
+                            onChange={e => setSchedule(s => ({ ...s, dayOfMonth2: parseInt(e.target.value) }))}
+                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white text-gray-900" />
+                        </div>
+                      </div>
+                    )}
+                    {schedule.frequency === 'monthly' && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Day of month</label>
+                        <input type="number" min={1} max={31} value={schedule.dayOfMonth ?? 1}
+                          onChange={e => setSchedule(s => ({ ...s, dayOfMonth: parseInt(e.target.value) }))}
+                          className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white text-gray-900" />
+                      </div>
+                    )}
+                    <p className="text-xs text-green-800 font-medium">
+                      Next payday: {computeNextPayday(schedule).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {selectedAccountId && accountEnvelopes.length > 0 && (

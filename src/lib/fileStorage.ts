@@ -7,15 +7,27 @@ const DATA_DIR = path.join(process.cwd(), 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const RESET_TOKENS_FILE = path.join(DATA_DIR, 'reset_tokens.json');
+const SHARES_FILE = path.join(DATA_DIR, 'shares.json');
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'default-key-change-in-production';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 
+interface Share {
+  ownerUserId: string;
+  ownerEmail: string;
+  targetEmail: string;
+  accountId: string;
+  role: 'view' | 'edit';
+  createdAt: string;
+}
+
+interface Shares { [shareId: string]: Share }
+
 async function initializeDirectories() {
   try {
     await fsPromises.mkdir(DATA_DIR, { recursive: true });
-    for (const file of [USERS_FILE, SESSIONS_FILE, RESET_TOKENS_FILE]) {
+    for (const file of [USERS_FILE, SESSIONS_FILE, RESET_TOKENS_FILE, SHARES_FILE]) {
       try {
         await fsPromises.access(file);
       } catch {
@@ -263,6 +275,67 @@ export class FileStorageService {
       }
 
       if (sessionToken) await this.deleteSession(sessionToken);
+    } finally {
+      releaseLock();
+    }
+  }
+
+  static async createShare(ownerUserId: string, ownerEmail: string, targetEmail: string, accountId: string, role: 'view' | 'edit'): Promise<string> {
+    const users = await readJson<Users>(USERS_FILE);
+    if (!Object.values(users).some(u => u.email === targetEmail)) {
+      throw new Error('No Capsule account found for that email address');
+    }
+    const releaseLock = await FileLock.acquire('shares-file');
+    try {
+      const shares = await readJson<Shares>(SHARES_FILE);
+      // Prevent duplicate shares for same account+email
+      const existing = Object.entries(shares).find(
+        ([, s]) => s.ownerUserId === ownerUserId && s.accountId === accountId && s.targetEmail === targetEmail
+      );
+      if (existing) return existing[0];
+      const shareId = crypto.randomUUID();
+      shares[shareId] = { ownerUserId, ownerEmail, targetEmail, accountId, role, createdAt: new Date().toISOString() };
+      await writeJson(SHARES_FILE, shares);
+      return shareId;
+    } finally {
+      releaseLock();
+    }
+  }
+
+  static async listShares(email: string, userId: string): Promise<{ received: Array<Share & { shareId: string }>; owned: Array<Share & { shareId: string }> }> {
+    const shares = await readJson<Shares>(SHARES_FILE);
+    const received = Object.entries(shares)
+      .filter(([, s]) => s.targetEmail === email)
+      .map(([shareId, s]) => ({ shareId, ...s }));
+    const owned = Object.entries(shares)
+      .filter(([, s]) => s.ownerUserId === userId)
+      .map(([shareId, s]) => ({ shareId, ...s }));
+    return { received, owned };
+  }
+
+  static async getShareData(shareId: string, requestorEmail: string): Promise<{ account: any; envelopes: any[]; transactions: any[] } | null> {
+    const shares = await readJson<Shares>(SHARES_FILE);
+    const share = shares[shareId];
+    if (!share || share.targetEmail !== requestorEmail) return null;
+    const data = await this.loadUserData(share.ownerUserId);
+    const account = data.accounts?.find((a: any) => a.id === share.accountId);
+    if (!account) return null;
+    const envelopes = (data.envelopes || []).filter((e: any) => e.accountId === share.accountId);
+    const transactions = (data.transactions || []).filter((t: any) => t.accountId === share.accountId);
+    return { account, envelopes, transactions };
+  }
+
+  static async revokeShare(shareId: string, requestorUserId: string): Promise<void> {
+    const releaseLock = await FileLock.acquire('shares-file');
+    try {
+      const shares = await readJson<Shares>(SHARES_FILE);
+      const share = shares[shareId];
+      if (!share) return;
+      if (share.ownerUserId !== requestorUserId && share.targetEmail !== requestorUserId) {
+        throw new Error('Not authorized to revoke this share');
+      }
+      delete shares[shareId];
+      await writeJson(SHARES_FILE, shares);
     } finally {
       releaseLock();
     }
