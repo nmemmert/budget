@@ -177,22 +177,25 @@ export default function ManualEntry({ onTransactionAdded, envelopes, accounts, t
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Assign to Envelope (Optional)
+            {isExpense ? 'Assign to Envelope (Optional)' : 'Assign Income to Envelope (Optional)'}
           </label>
+          {!isExpense && (
+            <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1 mb-2">
+              Assigning income to an envelope increases its available balance and reduces "Available to Budget".
+            </p>
+          )}
           <select
             value={selectedEnvelope}
             onChange={(e) => setSelectedEnvelope(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+            className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 bg-white text-gray-900 ${!isExpense ? 'border-green-400 focus:ring-green-500' : 'border-gray-300 focus:ring-blue-500'}`}
           >
-            <option value="">Select an envelope...</option>
+            <option value="">— Leave in Available to Budget —</option>
             {envelopes.map((envelope) => {
-              // Calculate remaining balance
               const incomeAllocated = transactions
                 .filter(t => t.envelopeId === envelope.id && t.amount > 0)
                 .reduce((sum, t) => sum + t.amount, 0);
               const totalAllocated = (envelope.allocated || 0) + incomeAllocated;
               const remaining = totalAllocated - (envelope.spent || 0);
-              
               return (
                 <option key={envelope.id} value={envelope.id}>
                   {envelope.name} — ${remaining.toFixed(2)} remaining

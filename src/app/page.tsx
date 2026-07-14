@@ -422,8 +422,8 @@ export default function BudgetDashboard() {
   const handleTransactionEdit = (updated: Transaction) => {
     setTransactions(prev => {
       const next = prev.map(t => t.id === updated.id ? updated : t);
-      setEnvelopes(calculateEnvelopeSpending(envelopes, next));
-      setAccounts(calculateAccountBalances(accounts, next));
+      setEnvelopes(e => calculateEnvelopeSpending(e, next));
+      setAccounts(a => calculateAccountBalances(a, next));
       return next;
     });
   };
@@ -431,8 +431,8 @@ export default function BudgetDashboard() {
   const handleTransactionDelete = (id: string) => {
     setTransactions(prev => {
       const next = prev.filter(t => t.id !== id);
-      setEnvelopes(calculateEnvelopeSpending(envelopes, next));
-      setAccounts(calculateAccountBalances(accounts, next));
+      setEnvelopes(e => calculateEnvelopeSpending(e, next));
+      setAccounts(a => calculateAccountBalances(a, next));
       return next;
     });
   };
@@ -928,9 +928,32 @@ export default function BudgetDashboard() {
       const incomeAlloc = transactions.filter(t => t.envelopeId === e.id && t.amount > 0).reduce((s, t) => s + t.amount, 0);
       return e.allocated + incomeAlloc > 0 && e.spent > e.allocated + incomeAlloc;
     });
+
+    // Available to budget = liquid assets (checking + savings) minus total envelope allocations
+    const liquidBalance = accounts
+      .filter(a => a.type === 'checking' || a.type === 'savings')
+      .reduce((s, a) => s + a.balance, 0);
+    const totalAllocated = envelopes.reduce((s, e) => s + e.allocated, 0);
+    const availableToBudget = liquidBalance - totalAllocated;
+
     return (
     <div className="px-4 py-6 sm:px-0">
-      <h2 className="text-2xl font-bold text-gray-900 mb-6">Envelopes</h2>
+      <h2 className="text-2xl font-bold text-gray-900 mb-4">Envelopes</h2>
+
+      {/* Available to Budget */}
+      <div className={`mb-6 rounded-xl border-2 p-5 flex items-center justify-between ${availableToBudget >= 0 ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
+        <div>
+          <p className="text-sm font-medium text-gray-600">Available to Budget</p>
+          <p className={`text-3xl font-bold mt-0.5 ${availableToBudget >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+            ${Math.abs(availableToBudget).toFixed(2)}{availableToBudget < 0 ? ' over' : ''}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            ${liquidBalance.toFixed(2)} in checking &amp; savings &minus; ${totalAllocated.toFixed(2)} allocated to envelopes
+          </p>
+        </div>
+        <div className="text-4xl">{availableToBudget >= 0 ? '💰' : '⚠️'}</div>
+      </div>
+
       {overspentEnvs.length > 0 && (
         <div className="mb-6 bg-red-50 border border-red-300 rounded-lg p-4 flex items-start gap-3">
           <span className="text-red-500 text-xl flex-shrink-0">⚠️</span>
@@ -1117,7 +1140,14 @@ export default function BudgetDashboard() {
                   accounts={accounts}
                   onAccountAdd={handleAccountAdd}
                   onAccountUpdate={handleAccountUpdate}
-                  onAccountDelete={id => setAccounts(prev => prev.filter(a => a.id !== id))}
+                  onAccountDelete={id => {
+                    setTransactions(prev => {
+                      const next = prev.filter(t => t.accountId !== id);
+                      setEnvelopes(e => calculateEnvelopeSpending(e, next));
+                      return next;
+                    });
+                    setAccounts(prev => prev.filter(a => a.id !== id));
+                  }}
                 />
                 {sharedAccounts.length > 0 && (
                   <div className="mt-8">
