@@ -323,14 +323,38 @@ export default function BudgetDashboard() {
     setLoading(false);
   };
 
-  const handleSetupComplete = (accs: Account[], envs: Envelope[]) => {
-    const accsWithBase = accs.map(a => {
-      const base = normalizeBalanceByType(a.type, a.startingBalance ?? a.balance);
-      return { ...a, startingBalance: base, balance: base };
-    });
-    setAccounts(accsWithBase);
-    setEnvelopes(envs);
-    setTransactions([]);
+  const handleSetupComplete = async (accs: Account[], envs: Envelope[]) => {
+    // Re-load from server so imported CSV transactions are included
+    try {
+      const userData = await DataService.loadUserData();
+      if (userData) {
+        const accsWithBase = (userData.accounts ?? accs).map(a => {
+          const base = normalizeBalanceByType(a.type, a.startingBalance ?? a.balance);
+          return { ...a, startingBalance: base, balance: base };
+        });
+        setAccounts(accsWithBase);
+        setEnvelopes(userData.envelopes ?? envs);
+        setTransactions(userData.transactions ?? []);
+        setGoals(userData.goals ?? []);
+        setTransactionRules(userData.transactionRules ?? []);
+      } else {
+        const accsWithBase = accs.map(a => {
+          const base = normalizeBalanceByType(a.type, a.startingBalance ?? a.balance);
+          return { ...a, startingBalance: base, balance: base };
+        });
+        setAccounts(accsWithBase);
+        setEnvelopes(envs);
+        setTransactions([]);
+      }
+    } catch {
+      const accsWithBase = accs.map(a => {
+        const base = normalizeBalanceByType(a.type, a.startingBalance ?? a.balance);
+        return { ...a, startingBalance: base, balance: base };
+      });
+      setAccounts(accsWithBase);
+      setEnvelopes(envs);
+      setTransactions([]);
+    }
     setSetupCompleted(true);
     setShowSetupWizard(false);
   };

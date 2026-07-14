@@ -32,7 +32,21 @@ interface SetupWizardProps {
   userId: string;
 }
 
-type WizardStep = 'welcome' | 'data-source' | 'accounts' | 'envelopes' | 'income-setup' | 'get-paid-setup' | 'complete';
+type WizardStep = 'welcome' | 'data-source' | 'csv-import' | 'accounts' | 'envelopes' | 'income-setup' | 'get-paid-setup' | 'complete';
+
+interface CsvRow { [key: string]: string }
+interface CsvMapping {
+  date: string;
+  description: string;
+  amount: string;
+  amountIn?: string;
+  amountOut?: string;
+  splitAmounts: boolean;
+  accountName: string;
+  accountType: 'checking' | 'savings' | 'credit_card';
+  skipRows: number;
+  negateAmount: boolean;
+}
 
 export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardProps) {
   const [currentStep, setCurrentStep] = useState<WizardStep>('welcome');
@@ -67,6 +81,17 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
   // Loading and error states
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // CSV import state
+  const [csvRawRows, setCsvRawRows] = useState<CsvRow[]>([]);
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [csvMapping, setCsvMapping] = useState<CsvMapping>({
+    date: '', description: '', amount: '', amountIn: '', amountOut: '',
+    splitAmounts: false, accountName: 'Imported Account',
+    accountType: 'checking', skipRows: 0, negateAmount: false,
+  });
+  const [csvFileName, setCsvFileName] = useState('');
+  const [pendingImportedTransactions, setPendingImportedTransactions] = useState<any[]>([]);
 
   // Modal ESC key handling and click outside
   useEffect(() => {
@@ -310,7 +335,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
       await DataService.saveUserData({
         accounts: accountsWithDefaults,
         envelopes: envelopesWithAllocations,
-        transactions: [],
+        transactions: pendingImportedTransactions,
         setupCompleted: true,
       });
       
@@ -364,7 +389,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <button
           onClick={() => {
-            setCurrentStep('accounts');
+            setCurrentStep('csv-import');
           }}
           className="p-6 border-2 border-gray-200 rounded-lg hover:border-blue-500 transition-colors"
         >
@@ -393,6 +418,291 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
       </button>
     </div>
   );
+
+  const handleCsvFile = (file: File) => {
+    setCsvFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) return;
+
+      // Parse CSV respecting quoted fields
+      const parseRow = (line: string): string[] => {
+        const result: string[] = [];
+        let cur = '';
+        let inQuote = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') { inQuote = !inQuote; }
+          else if (ch === ',' && !inQuote) { result.push(cur.trim()); cur = ''; }
+          else { cur += ch; }
+        }
+        result.push(cur.trim());
+        return result;
+      };
+
+      const headers = parseRow(lines[0]);
+      const rows: CsvRow[] = lines.slice(1).map(line => {
+        const vals = parseRow(line);
+        const row: CsvRow = {};
+        headers.forEach((h, i) => { row[h] = vals[i] ?? ''; });
+        return row;
+      });
+
+      setCsvHeaders(headers);
+      setCsvRawRows(rows);
+
+      // Auto-detect common column names
+      const find = (...candidates: string[]) =>
+        headers.find(h => candidates.some(c => h.toLowerCase().includes(c))) ?? '';
+      const dateCol = find('date', 'posted', 'transaction date', 'trans date');
+      const descCol = find('description', 'desc', 'memo', 'payee', 'name', 'details');
+      const amtCol = find('amount', 'amt', 'debit/credit', 'transaction amount');
+      const inCol = find('credit', 'deposit', 'money in', 'additions');
+      const outCol = find('debit', 'withdrawal', 'money out', 'subtractions');
+      const hasSplit = !amtCol && (inCol || outCol);
+
+      setCsvMapping(m => ({
+        ...m,
+        date: dateCol, description: descCol,
+        amount: amtCol, amountIn: inCol, amountOut: outCol,
+        splitAmounts: hasSplit,
+        accountName: file.name.replace(/\.csv$/i, '').replace(/[_-]/g, ' '),
+      }));
+    };
+    reader.readAsText(file);
+  };
+
+  const importCsvTransactions = () => {
+    const { date, description, amount, amountIn, amountOut, splitAmounts,
+      accountName, accountType, negateAmount } = csvMapping;
+    if (!date || !description || (!splitAmounts && !amount) || (splitAmounts && !amountIn && !amountOut)) {
+      alert('Please map the required columns (Date, Description, and Amount).');
+      return;
+    }
+
+    const parseAmt = (s: string): number => {
+      if (!s) return 0;
+      const n = parseFloat(s.replace(/[$,\s]/g, '').replace(/\((.+)\)/, '-$1'));
+      return isNaN(n) ? 0 : n;
+    };
+
+    const accountId = `csv-${Date.now()}`;
+    const newAcc: Account = {
+      id: accountId, name: accountName, type: accountType,
+      balance: 0, color: 'bg-blue-500', isActive: true,
+    };
+
+    let balance = 0;
+    const newTransactions: { id: string; accountId: string; amount: number; description: string; date: string; envelopeId?: string }[] = [];
+
+    csvRawRows.forEach((row, i) => {
+      let amt: number;
+      if (splitAmounts) {
+        const inAmt = amountIn ? parseAmt(row[amountIn]) : 0;
+        const outAmt = amountOut ? parseAmt(row[amountOut]) : 0;
+        amt = inAmt - Math.abs(outAmt);
+      } else {
+        amt = parseAmt(row[amount]);
+        if (negateAmount) amt = -amt;
+      }
+      if (amt === 0) return;
+
+      const rawDate = row[date] || '';
+      let parsedDate = rawDate;
+      try { parsedDate = new Date(rawDate).toISOString().split('T')[0]; } catch {}
+
+      balance += amt;
+      newTransactions.push({
+        id: `csv-tx-${Date.now()}-${i}`,
+        accountId,
+        amount: amt,
+        description: row[description] || 'Imported transaction',
+        date: parsedDate,
+      });
+    });
+
+    newAcc.balance = balance;
+    setAccounts(prev => [...prev, newAcc]);
+    setPendingImportedTransactions(newTransactions);
+    setCurrentStep('envelopes');
+  };
+
+  const renderCsvImport = () => {
+    const previewRows = csvRawRows.slice(0, 5);
+    const colOpts = ['', ...csvHeaders];
+
+    return (
+      <div>
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Import Bank CSV</h2>
+          <p className="text-gray-600">Upload a CSV export from your bank or credit card.</p>
+        </div>
+
+        {/* File upload */}
+        {!csvHeaders.length ? (
+          <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-blue-400 bg-gray-50 transition-colors">
+            <div className="text-4xl mb-2">📁</div>
+            <p className="text-sm text-gray-600 font-medium">Click to upload CSV file</p>
+            <p className="text-xs text-gray-400 mt-1">Most banks let you export transaction history as CSV</p>
+            <input type="file" accept=".csv,text/csv" className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleCsvFile(f); }} />
+          </label>
+        ) : (
+          <div className="space-y-5">
+            {/* File info */}
+            <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+              <span className="text-sm font-medium text-green-800">✓ {csvFileName} — {csvRawRows.length} rows detected</span>
+              <button onClick={() => { setCsvHeaders([]); setCsvRawRows([]); setCsvFileName(''); }}
+                className="text-xs text-red-600 hover:text-red-800">Remove</button>
+            </div>
+
+            {/* Account setup */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Account Name</label>
+                <input type="text" value={csvMapping.accountName}
+                  onChange={e => setCsvMapping(m => ({ ...m, accountName: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Account Type</label>
+                <select value={csvMapping.accountType}
+                  onChange={e => setCsvMapping(m => ({ ...m, accountType: e.target.value as CsvMapping['accountType'] }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="checking">Checking</option>
+                  <option value="savings">Savings</option>
+                  <option value="credit_card">Credit Card</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Column mapping */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-800 mb-3">Column Mapping</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Date column <span className="text-red-500">*</span></label>
+                  <select value={csvMapping.date}
+                    onChange={e => setCsvMapping(m => ({ ...m, date: e.target.value }))}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {colOpts.map(c => <option key={c} value={c}>{c || '-- select --'}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Description column <span className="text-red-500">*</span></label>
+                  <select value={csvMapping.description}
+                    onChange={e => setCsvMapping(m => ({ ...m, description: e.target.value }))}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {colOpts.map(c => <option key={c} value={c}>{c || '-- select --'}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Amount type toggle */}
+              <div className="mt-3 flex items-center gap-3">
+                <label className="text-xs font-medium text-gray-700">Amount format:</label>
+                <button onClick={() => setCsvMapping(m => ({ ...m, splitAmounts: false }))}
+                  className={`px-3 py-1 text-xs rounded-full border ${!csvMapping.splitAmounts ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300'}`}>
+                  Single column
+                </button>
+                <button onClick={() => setCsvMapping(m => ({ ...m, splitAmounts: true }))}
+                  className={`px-3 py-1 text-xs rounded-full border ${csvMapping.splitAmounts ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300'}`}>
+                  Separate debit/credit
+                </button>
+              </div>
+
+              {!csvMapping.splitAmounts ? (
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Amount column <span className="text-red-500">*</span></label>
+                    <select value={csvMapping.amount}
+                      onChange={e => setCsvMapping(m => ({ ...m, amount: e.target.value }))}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      {colOpts.map(c => <option key={c} value={c}>{c || '-- select --'}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-end pb-1">
+                    <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                      <input type="checkbox" checked={csvMapping.negateAmount}
+                        onChange={e => setCsvMapping(m => ({ ...m, negateAmount: e.target.checked }))}
+                        className="rounded" />
+                      Negate amounts (flip +/−)
+                    </label>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Credit / Money In</label>
+                    <select value={csvMapping.amountIn}
+                      onChange={e => setCsvMapping(m => ({ ...m, amountIn: e.target.value }))}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      {colOpts.map(c => <option key={c} value={c}>{c || '-- select --'}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Debit / Money Out</label>
+                    <select value={csvMapping.amountOut}
+                      onChange={e => setCsvMapping(m => ({ ...m, amountOut: e.target.value }))}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      {colOpts.map(c => <option key={c} value={c}>{c || '-- select --'}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Preview table */}
+            {previewRows.length > 0 && csvMapping.date && csvMapping.description && (
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">Preview (first 5 rows)</h3>
+                <div className="overflow-x-auto rounded border border-gray-200">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-2 py-1.5 text-left text-gray-600 font-medium">Date</th>
+                        <th className="px-2 py-1.5 text-left text-gray-600 font-medium">Description</th>
+                        <th className="px-2 py-1.5 text-right text-gray-600 font-medium">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewRows.map((row, i) => {
+                        const parseAmt = (s: string) => parseFloat(s?.replace(/[$,\s]/g, '').replace(/\((.+)\)/, '-$1')) || 0;
+                        let amt = csvMapping.splitAmounts
+                          ? parseAmt(csvMapping.amountIn ? row[csvMapping.amountIn] : '') - Math.abs(parseAmt(csvMapping.amountOut ? row[csvMapping.amountOut] : ''))
+                          : csvMapping.negateAmount ? -parseAmt(row[csvMapping.amount]) : parseAmt(row[csvMapping.amount]);
+                        return (
+                          <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                            <td className="px-2 py-1.5 text-gray-700">{row[csvMapping.date]}</td>
+                            <td className="px-2 py-1.5 text-gray-700 max-w-[200px] truncate">{row[csvMapping.description]}</td>
+                            <td className={`px-2 py-1.5 text-right font-medium ${amt >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {amt >= 0 ? '+' : ''}${Math.abs(amt).toFixed(2)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">{csvRawRows.length} total transactions will be imported</p>
+              </div>
+            )}
+
+            <button onClick={importCsvTransactions}
+              className="w-full bg-blue-600 text-white py-2.5 px-4 rounded-lg hover:bg-blue-700 font-medium text-sm">
+              Import {csvRawRows.length} Transactions →
+            </button>
+          </div>
+        )}
+
+        <div className="mt-4">
+          <button onClick={() => setCurrentStep('data-source')} className="text-blue-600 hover:text-blue-800 text-sm">← Back</button>
+        </div>
+      </div>
+    );
+  };
 
   const renderAccounts = () => (
     <div>
@@ -1071,6 +1381,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
           <div className="text-center text-sm text-gray-600">
             {currentStep === 'welcome' && 'Welcome'}
             {currentStep === 'data-source' && 'Choose Setup Method'}
+            {currentStep === 'csv-import' && 'Import Bank CSV'}
             {currentStep === 'accounts' && 'Add Your Accounts'}
             {currentStep === 'envelopes' && 'Create Budget Envelopes'}
             {currentStep === 'income-setup' && 'Configure Income Allocation'}
@@ -1082,6 +1393,7 @@ export default function SetupWizard({ onComplete, onSkip, userId }: SetupWizardP
         {/* Step Content */}
         {currentStep === 'welcome' && renderWelcome()}
         {currentStep === 'data-source' && renderDataSource()}
+        {currentStep === 'csv-import' && renderCsvImport()}
         {currentStep === 'accounts' && renderAccounts()}
         {currentStep === 'envelopes' && renderEnvelopes()}
         {currentStep === 'income-setup' && renderIncomeSetup()}
