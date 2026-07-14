@@ -929,9 +929,10 @@ export default function BudgetDashboard() {
       return e.allocated + incomeAlloc > 0 && e.spent > e.allocated + incomeAlloc;
     });
 
-    // Available to budget = liquid assets (checking + savings) minus total envelope allocations
+    // Available to budget = all asset accounts minus total envelope allocations
+    const LIABILITY_TYPES = ['credit_card', 'mortgage', 'loan'];
     const liquidBalance = accounts
-      .filter(a => a.type === 'checking' || a.type === 'savings')
+      .filter(a => !LIABILITY_TYPES.includes(a.type))
       .reduce((s, a) => s + a.balance, 0);
     const totalAllocated = envelopes.reduce((s, e) => s + e.allocated, 0);
     const availableToBudget = liquidBalance - totalAllocated;
@@ -948,7 +949,7 @@ export default function BudgetDashboard() {
             ${Math.abs(availableToBudget).toFixed(2)}{availableToBudget < 0 ? ' over' : ''}
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            ${liquidBalance.toFixed(2)} in checking &amp; savings &minus; ${totalAllocated.toFixed(2)} allocated to envelopes
+            ${liquidBalance.toFixed(2)} across all accounts &minus; ${totalAllocated.toFixed(2)} allocated to envelopes
           </p>
         </div>
         <div className="text-4xl">{availableToBudget >= 0 ? '💰' : '⚠️'}</div>
