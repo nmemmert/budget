@@ -66,6 +66,7 @@ ok "git $(git --version | awk '{print $3}')"
 # ── Clone / update ────────────────────────────────────────────────────────────
 if [ -d "$INSTALL_DIR/.git" ]; then
   info "Updating existing installation at $INSTALL_DIR..."
+  git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
   git -C "$INSTALL_DIR" pull --ff-only
 else
   info "Cloning to $INSTALL_DIR..."
