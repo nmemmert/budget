@@ -10,7 +10,7 @@ interface SettingsProps {
 }
 
 export default function Settings({ user, onAccountDeleted }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<'password' | 'export' | 'delete'>('password');
+  const [activeTab, setActiveTab] = useState<'password' | 'export' | 'backup' | 'delete'>('password');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showClearDataConfirm, setShowClearDataConfirm] = useState(false);
   const [deleteInput, setDeleteInput] = useState('');
@@ -233,6 +233,69 @@ export default function Settings({ user, onAccountDeleted }: SettingsProps) {
     }
   };
 
+  // ── Backup & Restore ────────────────────────────────────────────────────────
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [restoreLoading, setRestoreLoading] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleBackup = async () => {
+    setBackupLoading(true);
+    setBackupMessage(null);
+    try {
+      const token = AuthService.getSessionToken();
+      const res = await fetch('/api/admin/backup', { headers: { 'x-session-token': token ?? '' } });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error); }
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') ?? '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match?.[1] ?? 'capsule-backup.tar.gz';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+      setBackupMessage({ type: 'success', text: 'Backup downloaded successfully.' });
+    } catch (e: any) {
+      setBackupMessage({ type: 'error', text: e.message || 'Backup failed' });
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.endsWith('.tar.gz') && !file.name.endsWith('.tgz')) {
+      setBackupMessage({ type: 'error', text: 'File must be a .tar.gz backup.' });
+      return;
+    }
+    if (!confirm('This will replace ALL server data with the backup. Are you sure?')) {
+      e.target.value = '';
+      return;
+    }
+    setRestoreLoading(true);
+    setBackupMessage(null);
+    try {
+      const token = AuthService.getSessionToken();
+      const form = new FormData();
+      form.append('backup', file);
+      const res = await fetch('/api/admin/restore', {
+        method: 'POST',
+        headers: { 'x-session-token': token ?? '' },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setBackupMessage({ type: 'success', text: data.message });
+      setTimeout(() => AuthService.signOut(), 3000);
+    } catch (e: any) {
+      setBackupMessage({ type: 'error', text: e.message || 'Restore failed' });
+    } finally {
+      setRestoreLoading(false);
+      e.target.value = '';
+    }
+  };
+
   const handleClearData = async () => {
     if (clearDataInput !== 'CLEAR ALL' || !showClearDataConfirm) return;
 
@@ -269,6 +332,7 @@ export default function Settings({ user, onAccountDeleted }: SettingsProps) {
           {[
             { id: 'password', label: 'Password & Security' },
             { id: 'export', label: 'Data & Export' },
+            { id: 'backup', label: 'Backup & Restore' },
             { id: 'delete', label: 'Account' },
           ].map((tab) => (
             <button
@@ -497,6 +561,44 @@ export default function Settings({ user, onAccountDeleted }: SettingsProps) {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Backup & Restore Tab */}
+      {activeTab === 'backup' && (
+        <div className="space-y-6 max-w-md">
+          {backupMessage && (
+            <div className={`p-3 rounded-lg text-sm ${backupMessage.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+              {backupMessage.text}
+            </div>
+          )}
+
+          {/* Backup */}
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-1">Download Backup</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Downloads a <code>.tar.gz</code> archive of all server data — accounts, transactions, users, and sessions. Use this to migrate to a new server.
+            </p>
+            <button onClick={handleBackup} disabled={backupLoading}
+              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-opacity text-sm font-medium">
+              {backupLoading ? 'Creating backup…' : 'Download Backup'}
+            </button>
+          </div>
+
+          {/* Restore */}
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-1">Restore from Backup</h3>
+            <p className="text-sm text-gray-500 mb-1">
+              Upload a backup file to restore all data. <strong>This replaces everything on this server.</strong>
+            </p>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-4">
+              You will be signed out automatically after a successful restore.
+            </p>
+            <label className={`flex items-center justify-center w-full py-2 px-4 rounded-md text-sm font-medium cursor-pointer transition-opacity ${restoreLoading ? 'bg-gray-300 text-gray-500 pointer-events-none' : 'bg-amber-600 hover:bg-amber-700 text-white'}`}>
+              {restoreLoading ? 'Restoring…' : 'Choose Backup File…'}
+              <input type="file" accept=".tar.gz,.tgz" onChange={handleRestore} className="hidden" disabled={restoreLoading} />
+            </label>
           </div>
         </div>
       )}
